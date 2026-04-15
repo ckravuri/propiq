@@ -255,7 +255,7 @@ export default function PropertyDetailScreen() {
             ) : income.map(i => (
               <View key={i.income_id} style={[styles.entryCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.entryRow}>
-                  <View>
+                  <View style={{ flex: 1 }}>
                     <Text style={[styles.entryDate, { color: colors.textSecondary }]}>{i.date}</Text>
                     <Text style={[styles.entryType, { color: colors.textPrimary }]}>{i.income_type}{i.tenant_name ? ` - ${i.tenant_name}` : ''}</Text>
                     {i.notes ? <Text style={[styles.entryNotes, { color: colors.textSecondary }]}>{i.notes}</Text> : null}
@@ -274,13 +274,24 @@ export default function PropertyDetailScreen() {
             ) : expenses.map(e => (
               <View key={e.expense_id} style={[styles.entryCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.entryRow}>
-                  <View>
+                  <View style={{ flex: 1 }}>
                     <Text style={[styles.entryDate, { color: colors.textSecondary }]}>{e.date}</Text>
                     <Text style={[styles.entryType, { color: colors.textPrimary }]}>{e.category}{e.recurring ? ' (Recurring)' : ''}</Text>
                     {e.notes ? <Text style={[styles.entryNotes, { color: colors.textSecondary }]}>{e.notes}</Text> : null}
                   </View>
-                  <Text style={[styles.entryAmount, { color: colors.danger }]}>-${e.amount.toLocaleString()}</Text>
+                  <View style={styles.entryRight}>
+                    <Text style={[styles.entryAmount, { color: colors.danger }]}>-${e.amount.toLocaleString()}</Text>
+                    {(e as any).receipt_base64 && (
+                      <View style={[styles.receiptBadge, { backgroundColor: colors.primary + '15' }]}>
+                        <Ionicons name="receipt-outline" size={12} color={colors.primary} />
+                        <Text style={[styles.receiptBadgeText, { color: colors.primary }]}>Receipt</Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
+                {(e as any).receipt_base64 && (
+                  <Image source={{ uri: (e as any).receipt_base64 }} style={styles.receiptThumbnail} resizeMode="cover" />
+                )}
               </View>
             ))}
           </View>
@@ -347,5 +358,9 @@ const styles = StyleSheet.create({
   entryType: { fontSize: 15, fontWeight: '600', textTransform: 'capitalize' },
   entryNotes: { fontSize: 13, marginTop: 2 },
   entryAmount: { fontSize: 18, fontWeight: '700' },
+  entryRight: { alignItems: 'flex-end', gap: 4 },
+  receiptBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  receiptBadgeText: { fontSize: 10, fontWeight: '600' },
+  receiptThumbnail: { width: '100%', height: 120, borderRadius: 8, marginTop: 10 },
   emptyTab: { textAlign: 'center', paddingVertical: 40, fontSize: 14 },
 });

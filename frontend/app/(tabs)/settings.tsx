@@ -2,12 +2,14 @@ import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
 
 export default function SettingsScreen() {
   const { user, signOut } = useAuth();
   const { mode, colors, toggleTheme } = useTheme();
+  const router = useRouter();
 
   const SettingRow = ({ icon, label, value, onPress, rightComponent }: any) => (
     <TouchableOpacity style={[styles.settingRow, { borderBottomColor: colors.border }]}
@@ -55,6 +57,7 @@ export default function SettingsScreen() {
         {/* General */}
         <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>GENERAL</Text>
         <View style={[styles.settingGroup, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <SettingRow icon="alarm" label="Bill Reminders" value="Manage recurring bills" onPress={() => router.push('/reminders')} />
           <SettingRow icon="notifications" label="Notifications" value="Enabled" />
           <SettingRow icon="shield-checkmark" label="Privacy" value="Standard" />
           <SettingRow icon="help-circle" label="Help & Support" />

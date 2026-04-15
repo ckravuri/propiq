@@ -108,6 +108,7 @@ class ExpenseCreate(BaseModel):
     category: str = "miscellaneous"
     notes: str = ""
     recurring: bool = False
+    receipt_base64: Optional[str] = None
 
 class ExpenseOut(BaseModel):
     expense_id: str
@@ -118,6 +119,30 @@ class ExpenseOut(BaseModel):
     category: str = "miscellaneous"
     notes: str = ""
     recurring: bool = False
+    receipt_base64: Optional[str] = None
+    created_date: str = ""
+
+class ReminderCreate(BaseModel):
+    property_id: str
+    title: str
+    category: str = "miscellaneous"
+    amount: float = 0
+    due_day: int = 1
+    frequency: str = "monthly"
+    notes: str = ""
+
+class ReminderOut(BaseModel):
+    reminder_id: str
+    user_id: str
+    property_id: str
+    property_name: str = ""
+    title: str
+    category: str = "miscellaneous"
+    amount: float = 0
+    due_day: int = 1
+    frequency: str = "monthly"
+    notes: str = ""
+    active: bool = True
     created_date: str = ""
 
 # ==================== AUTH HELPERS ====================
@@ -324,6 +349,52 @@ async def delete_expense(expense_id: str, request: Request):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Expense entry not found")
     return {"message": "Expense deleted"}
+
+# ==================== REMINDERS ====================
+
+@api_router.get("/reminders", response_model=List[ReminderOut])
+async def list_reminders(request: Request):
+    user = await get_current_user(request)
+    reminders = await db.reminders.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_date", -1).to_list(1000)
+    # Enrich with property names
+    for r in reminders:
+        prop = await db.properties.find_one({"property_id": r.get("property_id"), "user_id": user["user_id"]}, {"_id": 0, "property_name": 1})
+        r["property_name"] = prop.get("property_name", "") if prop else ""
+    return reminders
+
+@api_router.post("/reminders", response_model=ReminderOut)
+async def create_reminder(reminder: ReminderCreate, request: Request):
+    user = await get_current_user(request)
+    prop = await db.properties.find_one({"property_id": reminder.property_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    entry = reminder.dict()
+    entry["reminder_id"] = f"rem_{uuid.uuid4().hex[:12]}"
+    entry["user_id"] = user["user_id"]
+    entry["active"] = True
+    entry["created_date"] = datetime.now(timezone.utc).isoformat()
+    entry["property_name"] = prop.get("property_name", "")
+    await db.reminders.insert_one(entry)
+    result = await db.reminders.find_one({"reminder_id": entry["reminder_id"]}, {"_id": 0})
+    return result
+
+@api_router.put("/reminders/{reminder_id}/toggle")
+async def toggle_reminder(reminder_id: str, request: Request):
+    user = await get_current_user(request)
+    rem = await db.reminders.find_one({"reminder_id": reminder_id, "user_id": user["user_id"]})
+    if not rem:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    new_active = not rem.get("active", True)
+    await db.reminders.update_one({"reminder_id": reminder_id}, {"$set": {"active": new_active}})
+    return {"message": "Reminder toggled", "active": new_active}
+
+@api_router.delete("/reminders/{reminder_id}")
+async def delete_reminder(reminder_id: str, request: Request):
+    user = await get_current_user(request)
+    result = await db.reminders.delete_one({"reminder_id": reminder_id, "user_id": user["user_id"]})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    return {"message": "Reminder deleted"}
 
 # ==================== DASHBOARD ====================
 

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, KeyboardAvoidingView, Switch } from 'react-native';
+import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, KeyboardAvoidingView, Switch, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../lib/theme';
 import { apiPost } from '../../lib/api';
 import { EXPENSE_CATEGORIES } from '../../lib/types';
@@ -12,6 +13,7 @@ export default function AddExpenseScreen() {
   const router = useRouter();
   const { propertyId, propertyName } = useLocalSearchParams<{ propertyId: string; propertyName: string }>();
   const [saving, setSaving] = useState(false);
+  const [receiptBase64, setReceiptBase64] = useState<string | null>(null);
   const [form, setForm] = useState({
     date: new Date().toISOString().split('T')[0],
     amount: '',
@@ -21,6 +23,37 @@ export default function AddExpenseScreen() {
   });
 
   const update = (key: string, val: any) => setForm(prev => ({ ...prev, [key]: val }));
+
+  const pickReceipt = async (source: 'library' | 'camera') => {
+    if (source === 'camera') {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        const msg = 'Camera permission is required';
+        Platform.OS === 'web' ? alert(msg) : Alert.alert('Permission needed', msg);
+        return;
+      }
+    } else {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        const msg = 'Photo library permission is required';
+        Platform.OS === 'web' ? alert(msg) : Alert.alert('Permission needed', msg);
+        return;
+      }
+    }
+    const options: ImagePicker.ImagePickerOptions = {
+      allowsEditing: true,
+      quality: 0.5,
+      base64: true,
+    };
+    const result = source === 'camera'
+      ? await ImagePicker.launchCameraAsync(options)
+      : await ImagePicker.launchImageLibraryAsync(options);
+    if (!result.canceled && result.assets[0]?.base64) {
+      const asset = result.assets[0];
+      const mimeType = asset.mimeType || 'image/jpeg';
+      setReceiptBase64(`data:${mimeType};base64,${asset.base64}`);
+    }
+  };
 
   const handleSave = async () => {
     if (!form.amount || parseFloat(form.amount) <= 0) {
@@ -37,6 +70,7 @@ export default function AddExpenseScreen() {
         category: form.category,
         notes: form.notes.trim(),
         recurring: form.recurring,
+        receipt_base64: receiptBase64,
       });
       router.back();
     } catch (e: any) {
@@ -106,6 +140,43 @@ export default function AddExpenseScreen() {
               trackColor={{ false: colors.border, true: colors.danger }} thumbColor="#FFF" />
           </View>
 
+          {/* Receipt/Invoice Attachment */}
+          <View style={styles.field}>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>Receipt / Invoice</Text>
+            <View style={[styles.receiptSection, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              {receiptBase64 ? (
+                <View>
+                  <Image testID="receipt-preview" source={{ uri: receiptBase64 }} style={styles.receiptPreview} resizeMode="cover" />
+                  <View style={styles.receiptActions}>
+                    <TouchableOpacity testID="change-receipt-btn" style={[styles.receiptBtn, { backgroundColor: colors.primary }]} onPress={() => pickReceipt('library')}>
+                      <Ionicons name="images" size={14} color="#FFF" />
+                      <Text style={styles.receiptBtnText}>Change</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity testID="remove-receipt-btn" style={[styles.receiptBtn, { backgroundColor: colors.danger }]} onPress={() => setReceiptBase64(null)}>
+                      <Ionicons name="trash" size={14} color="#FFF" />
+                      <Text style={styles.receiptBtnText}>Remove</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.receiptPlaceholder}>
+                  <Ionicons name="receipt-outline" size={32} color={colors.textSecondary} />
+                  <Text style={[styles.receiptPlaceholderText, { color: colors.textSecondary }]}>Attach receipt or invoice</Text>
+                  <View style={styles.receiptActions}>
+                    <TouchableOpacity testID="pick-receipt-btn" style={[styles.receiptBtn, { backgroundColor: colors.primary }]} onPress={() => pickReceipt('library')}>
+                      <Ionicons name="images" size={14} color="#FFF" />
+                      <Text style={styles.receiptBtnText}>Gallery</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity testID="take-receipt-btn" style={[styles.receiptBtn, { backgroundColor: colors.accent }]} onPress={() => pickReceipt('camera')}>
+                      <Ionicons name="camera" size={14} color="#FFF" />
+                      <Text style={styles.receiptBtnText}>Camera</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </View>
+          </View>
+
           <View style={styles.field}>
             <Text style={[styles.label, { color: colors.textSecondary }]}>Notes</Text>
             <TextInput testID="input-expense-notes"
@@ -141,4 +212,11 @@ const styles = StyleSheet.create({
   recurringRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, borderTopWidth: 1, borderBottomWidth: 1, marginBottom: 16 },
   recurringLabel: { fontSize: 15, fontWeight: '500' },
   recurringDesc: { fontSize: 12, marginTop: 2 },
+  receiptSection: { borderRadius: 16, borderWidth: 1, overflow: 'hidden' },
+  receiptPreview: { width: '100%', height: 180, borderRadius: 14 },
+  receiptPlaceholder: { alignItems: 'center', paddingVertical: 24, gap: 6 },
+  receiptPlaceholderText: { fontSize: 14 },
+  receiptActions: { flexDirection: 'row', justifyContent: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 16 },
+  receiptBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
+  receiptBtnText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
 });
