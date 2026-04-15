@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, KeyboardAvoidingView } from 'react-native';
+import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, KeyboardAvoidingView, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../lib/theme';
 import { apiPost, apiPut, apiGet } from '../../lib/api';
 import { PROPERTY_TYPES, STATES } from '../../lib/types';
@@ -15,6 +16,7 @@ export default function AddPropertyScreen() {
 
   const [saving, setSaving] = useState(false);
   const [loadingEdit, setLoadingEdit] = useState(isEdit);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [form, setForm] = useState({
     property_name: '', address: '', suburb: '', state: '', postcode: '',
     purchase_price: '', purchase_date: '', loan_amount: '', interest_rate: '',
@@ -43,9 +45,47 @@ export default function AddPropertyScreen() {
           land_size: String(p.land_size || ''),
           notes: p.notes || '',
         });
+        if (p.image_base64) setImageBase64(p.image_base64);
       }).catch(console.error).finally(() => setLoadingEdit(false));
     }
   }, [editId]);
+
+  const pickImage = async (source: 'library' | 'camera') => {
+    if (source === 'camera') {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        const msg = 'Camera permission is required to take photos';
+        Platform.OS === 'web' ? alert(msg) : Alert.alert('Permission needed', msg);
+        return;
+      }
+    } else {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        const msg = 'Photo library permission is required to select images';
+        Platform.OS === 'web' ? alert(msg) : Alert.alert('Permission needed', msg);
+        return;
+      }
+    }
+
+    const options: ImagePicker.ImagePickerOptions = {
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.5,
+      base64: true,
+    };
+
+    const result = source === 'camera'
+      ? await ImagePicker.launchCameraAsync(options)
+      : await ImagePicker.launchImageLibraryAsync(options);
+
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      if (asset.base64) {
+        const mimeType = asset.mimeType || 'image/jpeg';
+        setImageBase64(`data:${mimeType};base64,${asset.base64}`);
+      }
+    }
+  };
 
   const update = (key: string, val: string) => setForm(prev => ({ ...prev, [key]: val }));
 
@@ -74,6 +114,7 @@ export default function AddPropertyScreen() {
         parking: parseInt(form.parking) || 0,
         land_size: parseFloat(form.land_size) || 0,
         notes: form.notes.trim(),
+        image_base64: imageBase64,
       };
       if (isEdit) {
         await apiPut(`/properties/${editId}`, body);
@@ -124,6 +165,40 @@ export default function AddPropertyScreen() {
         </View>
 
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>PROPERTY IMAGE</Text>
+          <View style={[styles.imageSection, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            {imageBase64 ? (
+              <View>
+                <Image testID="property-image-preview" source={{ uri: imageBase64 }} style={styles.imagePreview} resizeMode="cover" />
+                <View style={styles.imageActions}>
+                  <TouchableOpacity testID="change-image-btn" style={[styles.imageBtn, { backgroundColor: colors.primary }]} onPress={() => pickImage('library')}>
+                    <Ionicons name="images" size={16} color="#FFF" />
+                    <Text style={styles.imageBtnText}>Change</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity testID="remove-image-btn" style={[styles.imageBtn, { backgroundColor: colors.danger }]} onPress={() => setImageBase64(null)}>
+                    <Ionicons name="trash" size={16} color="#FFF" />
+                    <Text style={styles.imageBtnText}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.imagePlaceholder}>
+                <Ionicons name="image-outline" size={40} color={colors.textSecondary} />
+                <Text style={[styles.imagePlaceholderText, { color: colors.textSecondary }]}>Add a property photo</Text>
+                <View style={styles.imageActions}>
+                  <TouchableOpacity testID="pick-photo-btn" style={[styles.imageBtn, { backgroundColor: colors.primary }]} onPress={() => pickImage('library')}>
+                    <Ionicons name="images" size={16} color="#FFF" />
+                    <Text style={styles.imageBtnText}>Gallery</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity testID="take-photo-btn" style={[styles.imageBtn, { backgroundColor: colors.accent }]} onPress={() => pickImage('camera')}>
+                    <Ionicons name="camera" size={16} color="#FFF" />
+                    <Text style={styles.imageBtnText}>Camera</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          </View>
+
           <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>BASIC INFO</Text>
           <Field label="Property Name" value={form.property_name} onChangeText={(v: string) => update('property_name', v)} placeholder="e.g. Sydney Investment #1" />
           
@@ -207,4 +282,11 @@ const styles = StyleSheet.create({
   stateChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, marginRight: 6 },
   stateChipText: { fontSize: 12, fontWeight: '600' },
   row: { flexDirection: 'row', gap: 10 },
+  imageSection: { borderRadius: 16, borderWidth: 1, overflow: 'hidden', marginBottom: 4 },
+  imagePreview: { width: '100%', height: 200, borderRadius: 14 },
+  imagePlaceholder: { alignItems: 'center', paddingVertical: 28, gap: 8 },
+  imagePlaceholderText: { fontSize: 14 },
+  imageActions: { flexDirection: 'row', justifyContent: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 16 },
+  imageBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
+  imageBtnText: { color: '#FFF', fontSize: 13, fontWeight: '600' },
 });

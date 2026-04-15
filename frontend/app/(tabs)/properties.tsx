@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,6 +38,10 @@ export default function PropertiesScreen() {
     <TouchableOpacity testID={`property-item-${item.property_id}`}
       style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
       onPress={() => router.push(`/property/${item.property_id}`)} activeOpacity={0.7}>
+      {item.image_base64 && (
+        <Image source={{ uri: item.image_base64 }} style={styles.cardImage} resizeMode="cover" />
+      )}
+      <View style={styles.cardContent}>
       <View style={styles.cardHeader}>
         <View style={[styles.typeTag, { backgroundColor: colors.primary + '15' }]}>
           <Ionicons name={item.property_type === 'house' ? 'home' : item.property_type === 'unit' ? 'business' : 'layers'} size={14} color={colors.primary} />
@@ -72,6 +76,7 @@ export default function PropertiesScreen() {
           <Ionicons name="car-outline" size={14} color={colors.textSecondary} />
           <Text style={[styles.specText, { color: colors.textSecondary }]}>{item.parking}</Text>
         </View>
+      </View>
       </View>
     </TouchableOpacity>
   );
@@ -122,7 +127,9 @@ const styles = StyleSheet.create({
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
   addBtnText: { color: '#FFF', fontSize: 14, fontWeight: '600' },
   list: { padding: 20, gap: 12 },
-  card: { borderRadius: 16, padding: 16, borderWidth: 1 },
+  card: { borderRadius: 16, borderWidth: 1, overflow: 'hidden' },
+  cardImage: { width: '100%', height: 140 },
+  cardContent: { padding: 16 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   typeTag: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   typeText: { fontSize: 12, fontWeight: '600', textTransform: 'capitalize' },

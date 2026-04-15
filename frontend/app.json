@@ -38,6 +38,13 @@
           "resizeMode": "contain",
           "backgroundColor": "#1C3F35"
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Select property photos",
+          "cameraPermission": "Take property photos"
+        }
       ]
     ],
     "experiments": {

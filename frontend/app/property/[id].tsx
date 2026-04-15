@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -113,6 +113,13 @@ export default function PropertyDetailScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+        {/* Property Image */}
+        {property.image_base64 && (
+          <View style={[styles.imageContainer, { borderColor: colors.border }]}>
+            <Image testID="property-detail-image" source={{ uri: property.image_base64 }} style={styles.propertyImage} resizeMode="cover" />
+          </View>
+        )}
+
         {/* Summary Card */}
         <View testID="property-summary-card" style={[styles.summaryCard, { backgroundColor: colors.primary }]}>
           <View style={styles.summaryTop}>
@@ -294,6 +301,8 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: 'row', gap: 8 },
   headerBtn: { padding: 6 },
   scroll: { paddingHorizontal: 20, paddingTop: 16 },
+  imageContainer: { borderRadius: 16, overflow: 'hidden', marginBottom: 12, borderWidth: 1 },
+  propertyImage: { width: '100%', height: 200 },
   summaryCard: { borderRadius: 20, padding: 20, marginBottom: 12 },
   summaryTop: { marginBottom: 12 },
   typeTag: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6, marginBottom: 6 },
