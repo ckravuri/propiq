@@ -10,18 +10,28 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.propiq.app",
       "infoPlist": {
         "NSCameraUsageDescription": "Upload property photos",
-        "NSPhotoLibraryUsageDescription": "Attach property images"
+        "NSPhotoLibraryUsageDescription": "Attach property images",
+        "NSUserTrackingUsageDescription": "Personalize ad experience",
+        "SKAdNetworkItems": [
+          { "SKAdNetworkIdentifier": "cstr6suwn9.skadnetwork" }
+        ]
       }
     },
     "android": {
+      "package": "com.propiq.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#1C3F35"
       },
       "edgeToEdgeEnabled": true,
-      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE"]
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "com.google.android.gms.permission.AD_ID"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -44,6 +54,13 @@
         {
           "photosPermission": "Select property photos",
           "cameraPermission": "Take property photos"
+        }
+      ],
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
+          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
         }
       ]
     ],

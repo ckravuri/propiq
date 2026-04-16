@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../lib/auth';
 import { useTheme } from '../lib/theme';
+import PropIQLogo from '../components/PropIQLogo';
 
 export default function LoginScreen() {
   const { user, loading, signIn } = useAuth();
@@ -30,9 +31,7 @@ export default function LoginScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.primary }]}>
       <View style={styles.topSection}>
-        <View style={[styles.logoCircle, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
-          <Ionicons name="business" size={48} color="#FFFFFF" />
-        </View>
+        <PropIQLogo size={88} color="#FFFFFF" />
         <Text style={styles.appName}>PropIQ</Text>
         <Text style={styles.tagline}>Smart Property Investment Tracking</Text>
       </View>
@@ -87,14 +86,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
-  },
-  logoCircle: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
   },
   appName: {
     fontSize: 36,
