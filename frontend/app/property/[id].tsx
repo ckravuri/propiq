@@ -258,6 +258,11 @@ export default function PropertyDetailScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.entryDate, { color: colors.textSecondary }]}>{i.date}</Text>
                     <Text style={[styles.entryType, { color: colors.textPrimary }]}>{i.income_type}{i.tenant_name ? ` - ${i.tenant_name}` : ''}</Text>
+                    {(i as any).frequency && (
+                      <Text style={[styles.entryNotes, { color: colors.primary }]}>
+                        {(i as any).frequency} → ${((i as any).frequency === 'weekly' ? i.amount * 52 : (i as any).frequency === 'fortnightly' ? i.amount * 26 : i.amount * 12).toLocaleString()}/yr
+                      </Text>
+                    )}
                     {i.notes ? <Text style={[styles.entryNotes, { color: colors.textSecondary }]}>{i.notes}</Text> : null}
                   </View>
                   <Text style={[styles.entryAmount, { color: colors.success }]}>+${i.amount.toLocaleString()}</Text>

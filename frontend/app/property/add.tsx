@@ -279,10 +279,14 @@ export default function AddPropertyScreen() {
                     <TouchableOpacity key={i} testID={`address-suggestion-${i}`}
                       style={[styles.suggestionRow, i < suggestions.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 0.5 }]}
                       onPress={() => selectAddress(s)}>
-                      <Ionicons name="location" size={16} color={colors.primary} />
+                      <Ionicons name="location" size={16} color={colors.primary} style={{ marginTop: 2 }} />
                       <View style={{ flex: 1 }}>
-                        <Text style={[styles.suggestionStreet, { color: colors.textPrimary }]}>{s.street}</Text>
-                        <Text style={[styles.suggestionDetail, { color: colors.textSecondary }]}>{s.suburb}, {AU_STATE_MAP[s.state] || s.state} {s.postcode}</Text>
+                        <Text style={[styles.suggestionStreet, { color: colors.textPrimary }]} numberOfLines={1}>
+                          {s.street || s.display.split(',')[0]}
+                        </Text>
+                        <Text style={[styles.suggestionDetail, { color: colors.textSecondary }]} numberOfLines={2}>
+                          {s.display}
+                        </Text>
                       </View>
                     </TouchableOpacity>
                   ))}

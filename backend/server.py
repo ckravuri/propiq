@@ -87,6 +87,7 @@ class IncomeCreate(BaseModel):
     date: str
     amount: float
     income_type: str = "rent"
+    frequency: str = "weekly"
     tenant_name: str = ""
     notes: str = ""
 
@@ -97,6 +98,7 @@ class IncomeOut(BaseModel):
     date: str
     amount: float
     income_type: str = "rent"
+    frequency: str = "weekly"
     tenant_name: str = ""
     notes: str = ""
     created_date: str = ""
@@ -415,7 +417,20 @@ async def get_dashboard(request: Request):
 
     ytd_income = [i for i in all_income if i.get("date", "") >= year_start]
     ytd_expenses = [e for e in all_expenses if e.get("date", "") >= year_start]
-    total_yearly_income = sum(i.get("amount", 0) for i in ytd_income)
+    
+    # Calculate yearly income using frequency multiplier
+    def annualize(entry):
+        amt = entry.get("amount", 0)
+        freq = entry.get("frequency", "weekly")
+        if freq == "weekly":
+            return amt * 52
+        elif freq == "fortnightly":
+            return amt * 26
+        elif freq == "monthly":
+            return amt * 12
+        return amt  # one-off
+    
+    total_yearly_income = sum(annualize(i) for i in ytd_income)
     total_yearly_expenses = sum(e.get("amount", 0) for e in ytd_expenses)
     net_cashflow = total_yearly_income - total_yearly_expenses
     monthly_avg_income = total_yearly_income / max(now.month, 1)
@@ -427,7 +442,7 @@ async def get_dashboard(request: Request):
         pid = p["property_id"]
         p_income = [i for i in ytd_income if i["property_id"] == pid]
         p_expenses = [e for e in ytd_expenses if e["property_id"] == pid]
-        p_income_total = sum(i.get("amount", 0) for i in p_income)
+        p_income_total = sum(annualize(i) for i in p_income)
         p_expense_total = sum(e.get("amount", 0) for e in p_expenses)
         p_repairs = sum(e.get("amount", 0) for e in p_expenses if e.get("category") in ["repairs", "repeated repairs", "maintenance"])
         p_net = p_income_total - p_expense_total
