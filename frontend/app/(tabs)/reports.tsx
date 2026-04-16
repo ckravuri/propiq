@@ -60,49 +60,125 @@ export default function ReportsScreen() {
     try {
       const summary = await apiGet(`/reports/summary/${propertyId}?year=${currentYear}`);
       const p = summary.property;
+      
+      // SVG logo for PropIQ (building icon)
+      const logoSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="36" height="36"><rect x="0" y="0" width="40" height="40" rx="8" fill="#1C3F35"/><rect x="8" y="14" width="6" height="4" rx="1" fill="white"/><rect x="17" y="14" width="6" height="4" rx="1" fill="white"/><rect x="26" y="14" width="6" height="4" rx="1" fill="white"/><rect x="8" y="21" width="6" height="4" rx="1" fill="white"/><rect x="17" y="21" width="6" height="4" rx="1" fill="white"/><rect x="26" y="21" width="6" height="4" rx="1" fill="white"/><rect x="16" y="28" width="8" height="7" rx="1" fill="white"/><rect x="6" y="10" width="28" height="2" rx="1" fill="white"/><polygon points="20,4 4,10 36,10" fill="white"/></svg>`;
+      
       const html = `
         <html><head><style>
-          body { font-family: -apple-system, sans-serif; padding: 40px; color: #1C1917; }
-          h1 { color: #1C3F35; font-size: 28px; border-bottom: 2px solid #1C3F35; padding-bottom: 10px; }
-          h2 { color: #1C3F35; font-size: 20px; margin-top: 30px; }
-          .summary-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 15px 0; }
-          .summary-item { background: #F9F8F6; padding: 12px; border-radius: 8px; flex: 1; min-width: 200px; }
-          .summary-label { font-size: 12px; color: #78716C; text-transform: uppercase; }
-          .summary-value { font-size: 20px; font-weight: 700; margin-top: 4px; }
-          table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-          th { background: #1C3F35; color: white; padding: 8px; text-align: left; font-size: 12px; }
-          td { padding: 8px; border-bottom: 1px solid #E7E5E4; font-size: 12px; }
-          .positive { color: #22C55E; } .negative { color: #EF4444; }
+          @page {
+            margin: 60px 40px 60px 40px;
+            size: A4;
+          }
+          body { font-family: -apple-system, Helvetica Neue, sans-serif; padding: 0; color: #1C1917; margin: 0; }
+          
+          /* Page header with logo - repeats on every printed page */
+          .page-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding-bottom: 14px;
+            border-bottom: 2px solid #1C3F35;
+            margin-bottom: 24px;
+          }
+          .page-header .brand-name {
+            font-size: 22px;
+            font-weight: 800;
+            color: #1C3F35;
+            letter-spacing: -0.5px;
+          }
+          .page-header .brand-tagline {
+            font-size: 11px;
+            color: #78716C;
+            margin-left: auto;
+          }
+          
+          h1 { color: #1C3F35; font-size: 24px; margin: 0 0 4px 0; }
+          h2 { color: #1C3F35; font-size: 18px; margin-top: 28px; margin-bottom: 10px; border-bottom: 1px solid #E7E5E4; padding-bottom: 6px; }
+          .report-meta { font-size: 12px; color: #78716C; margin-bottom: 20px; }
+          .summary-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+          .summary-item { background: #F9F8F6; padding: 12px 14px; border-radius: 8px; flex: 1; min-width: 180px; border: 1px solid #E7E5E4; }
+          .summary-label { font-size: 10px; color: #78716C; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+          .summary-value { font-size: 18px; font-weight: 700; margin-top: 4px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+          th { background: #1C3F35; color: white; padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+          td { padding: 8px 10px; border-bottom: 1px solid #E7E5E4; font-size: 12px; }
+          tr:nth-child(even) { background: #FAFAF9; }
+          .positive { color: #16A34A; } .negative { color: #DC2626; }
+          
+          /* Footer on every page */
+          .page-footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 9px;
+            color: #A8A29E;
+            padding: 10px 40px;
+            border-top: 1px solid #E7E5E4;
+          }
+          
+          /* Running header for print pages */
+          @media print {
+            thead { display: table-header-group; }
+            .page-break { page-break-before: always; }
+          }
         </style></head><body>
-        <h1>PropIQ Report - ${propertyName}</h1>
-        <p>Year: ${currentYear} | Generated: ${new Date().toLocaleDateString()}</p>
-        <h2>Property Summary</h2>
+        
+        <!-- Page Header with Logo -->
+        <div class="page-header">
+          ${logoSvg}
+          <span class="brand-name">PropIQ</span>
+          <span class="brand-tagline">Smart Property Investment Tracking</span>
+        </div>
+
+        <h1>${propertyName}</h1>
+        <div class="report-meta">Financial Year ${currentYear} &nbsp;|&nbsp; Generated ${new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+        
+        <h2>Property Details</h2>
         <div class="summary-grid">
-          <div class="summary-item"><div class="summary-label">Address</div><div>${p.address} ${p.suburb} ${p.state} ${p.postcode}</div></div>
-          <div class="summary-item"><div class="summary-label">Type</div><div>${p.property_type}</div></div>
+          <div class="summary-item"><div class="summary-label">Address</div><div style="font-size:14px;margin-top:4px;">${p.address} ${p.suburb} ${p.state} ${p.postcode}</div></div>
+          <div class="summary-item"><div class="summary-label">Type</div><div style="font-size:14px;margin-top:4px;text-transform:capitalize;">${p.property_type}</div></div>
+          <div class="summary-item"><div class="summary-label">Bedrooms / Bathrooms / Parking</div><div style="font-size:14px;margin-top:4px;">${p.bedrooms || 0} / ${p.bathrooms || 0} / ${p.parking || 0}</div></div>
+        </div>
+        <div class="summary-grid">
           <div class="summary-item"><div class="summary-label">Purchase Price</div><div class="summary-value">$${(p.purchase_price || 0).toLocaleString()}</div></div>
           <div class="summary-item"><div class="summary-label">Current Value</div><div class="summary-value">$${(p.current_estimated_value || 0).toLocaleString()}</div></div>
+          <div class="summary-item"><div class="summary-label">Loan Amount</div><div class="summary-value">$${(p.loan_amount || 0).toLocaleString()}</div></div>
+          <div class="summary-item"><div class="summary-label">Interest Rate</div><div class="summary-value">${p.interest_rate || 0}%</div></div>
         </div>
+        
         <h2>Financial Summary</h2>
         <div class="summary-grid">
           <div class="summary-item"><div class="summary-label">Total Income</div><div class="summary-value positive">$${summary.total_income.toLocaleString()}</div></div>
           <div class="summary-item"><div class="summary-label">Total Expenses</div><div class="summary-value negative">$${summary.total_expenses.toLocaleString()}</div></div>
-          <div class="summary-item"><div class="summary-label">Net Profit/Loss</div><div class="summary-value ${summary.net_profit_loss >= 0 ? 'positive' : 'negative'}">$${summary.net_profit_loss.toLocaleString()}</div></div>
+          <div class="summary-item"><div class="summary-label">Net Profit / Loss</div><div class="summary-value ${summary.net_profit_loss >= 0 ? 'positive' : 'negative'}">$${summary.net_profit_loss.toLocaleString()}</div></div>
           <div class="summary-item"><div class="summary-label">Capital Growth</div><div class="summary-value">${summary.capital_growth_pct}%</div></div>
         </div>
+        
         <h2>Expense Breakdown</h2>
-        <table><tr><th>Category</th><th>Amount</th></tr>
-        ${Object.entries(summary.expense_by_category || {}).map(([cat, amt]) => `<tr><td>${cat}</td><td>$${(amt as number).toLocaleString()}</td></tr>`).join('')}
+        <table><tr><th>Category</th><th style="text-align:right">Amount</th></tr>
+        ${Object.entries(summary.expense_by_category || {}).map(([cat, amt]) => `<tr><td style="text-transform:capitalize">${cat}</td><td style="text-align:right">$${(amt as number).toLocaleString()}</td></tr>`).join('')}
+        ${Object.keys(summary.expense_by_category || {}).length === 0 ? '<tr><td colspan="2" style="text-align:center;color:#A8A29E;padding:16px;">No expenses recorded</td></tr>' : ''}
         </table>
+        
         <h2>Income Entries</h2>
-        <table><tr><th>Date</th><th>Amount</th><th>Type</th><th>Notes</th></tr>
-        ${(summary.income_entries || []).map((i: any) => `<tr><td>${i.date}</td><td>$${i.amount}</td><td>${i.income_type}</td><td>${i.notes}</td></tr>`).join('')}
+        <table><tr><th>Date</th><th>Amount</th><th>Type</th><th>Frequency</th><th>Notes</th></tr>
+        ${(summary.income_entries || []).map((i: any) => `<tr><td>${i.date}</td><td>$${(i.amount || 0).toLocaleString()}</td><td style="text-transform:capitalize">${i.income_type || ''}</td><td style="text-transform:capitalize">${i.frequency || ''}</td><td>${i.notes || ''}</td></tr>`).join('')}
+        ${(summary.income_entries || []).length === 0 ? '<tr><td colspan="5" style="text-align:center;color:#A8A29E;padding:16px;">No income entries</td></tr>' : ''}
         </table>
+        
         <h2>Expense Entries</h2>
-        <table><tr><th>Date</th><th>Amount</th><th>Category</th><th>Notes</th></tr>
-        ${(summary.expense_entries || []).map((e: any) => `<tr><td>${e.date}</td><td>$${e.amount}</td><td>${e.category}</td><td>${e.notes}</td></tr>`).join('')}
+        <table><tr><th>Date</th><th>Amount</th><th>Category</th><th>Recurring</th><th>Notes</th></tr>
+        ${(summary.expense_entries || []).map((e: any) => `<tr><td>${e.date}</td><td>$${(e.amount || 0).toLocaleString()}</td><td style="text-transform:capitalize">${e.category || ''}</td><td>${e.recurring ? 'Yes (' + (e.frequency || 'monthly') + ')' : 'No'}</td><td>${e.notes || ''}</td></tr>`).join('')}
+        ${(summary.expense_entries || []).length === 0 ? '<tr><td colspan="5" style="text-align:center;color:#A8A29E;padding:16px;">No expense entries</td></tr>' : ''}
         </table>
-        <p style="margin-top:40px;color:#78716C;font-size:11px;">Generated by PropIQ</p>
+
+        <!-- Footer -->
+        <div class="page-footer">
+          PropIQ — Smart Property Investment Tracking &nbsp;|&nbsp; Report generated on ${new Date().toLocaleDateString('en-AU')} &nbsp;|&nbsp; Page content is for informational purposes only
+        </div>
         </body></html>`;
 
       const { uri } = await Print.printToFileAsync({ html });
@@ -124,26 +200,39 @@ export default function ReportsScreen() {
     setGenerating(propertyId + '_csv');
     try {
       const data = await apiGet(`/reports/csv/${propertyId}?year=${currentYear}`);
-      const csvContent = atob(data.content_base64);
+      
       if (Platform.OS === 'web') {
+        // Web: decode base64 and download
+        const csvContent = atob(data.content_base64);
         const blob = new Blob([csvContent], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = data.filename;
         a.click();
+        URL.revokeObjectURL(url);
       } else {
+        // Mobile: write base64 directly to file then share
         const fileUri = FileSystem.documentDirectory + data.filename;
-        await FileSystem.writeAsStringAsync(fileUri, csvContent);
+        await FileSystem.writeAsStringAsync(fileUri, data.content_base64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
         if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(fileUri);
+          await Sharing.shareAsync(fileUri, {
+            mimeType: 'text/csv',
+            dialogTitle: `Export ${propertyName} Report`,
+            UTI: 'public.comma-separated-values-text',
+          });
+        } else {
+          Alert.alert('Success', `CSV saved to ${fileUri}`);
         }
       }
     } catch (e: any) {
+      const msg = 'CSV export error: ' + (e.message || 'Unknown error');
       if (Platform.OS === 'web') {
-        alert('CSV export error: ' + e.message);
+        alert(msg);
       } else {
-        Alert.alert('Error', e.message);
+        Alert.alert('Error', msg);
       }
     } finally {
       setGenerating(null);

@@ -584,8 +584,10 @@ async def generate_csv_report(property_id: str, request: Request, year: int = Qu
         writer.writerow([e.get("date", ""), e.get("amount", 0), e.get("category", ""), e.get("recurring", False), e.get("notes", "")])
     
     csv_content = output.getvalue()
-    csv_b64 = base64.b64encode(csv_content.encode()).decode()
-    return {"filename": f"PropIQ_{prop.get('property_name', 'report')}_{year}.csv", "content_base64": csv_b64, "content_type": "text/csv"}
+    csv_b64 = base64.b64encode(csv_content.encode('utf-8')).decode('ascii')
+    # Sanitize filename - remove special chars
+    safe_name = re.sub(r'[^\w\s-]', '', prop.get('property_name', 'report')).strip().replace(' ', '_')
+    return {"filename": f"PropIQ_{safe_name}_{year}.csv", "content_base64": csv_b64, "content_type": "text/csv"}
 
 @api_router.get("/reports/summary/{property_id}")
 async def get_report_summary(property_id: str, request: Request, year: int = Query(default=None)):

@@ -1,282 +1,361 @@
 #!/usr/bin/env python3
 """
-PropIQ Backend API Testing Script
-Tests the property lookup endpoint and existing endpoints
+PropIQ Backend API Testing - Reports Endpoints
+Testing the Reports endpoints as specified in the review request.
 """
 
 import requests
 import json
+import base64
+import csv
+import io
 import sys
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
-# Backend URL from frontend .env
-BASE_URL = "https://propiq-test.preview.emergentagent.com/api"
+# Configuration
+BACKEND_URL = "https://propiq-test.preview.emergentagent.com"
+AUTH_HEADER = {"Authorization": "Bearer test_session_propiq_123"}
+TEST_YEAR = 2026
 
-# Test auth header as specified in review request
-TEST_AUTH_HEADER = {"Authorization": "Bearer test_session_propiq_123"}
-
-def test_health_endpoint():
-    """Test the health endpoint"""
-    print("🔍 Testing health endpoint...")
-    try:
-        response = requests.get(f"{BASE_URL}/health", timeout=10)
-        print(f"   Status: {response.status_code}")
+class PropIQTester:
+    def __init__(self):
+        self.base_url = BACKEND_URL
+        self.headers = AUTH_HEADER
+        self.test_results = []
+        self.property_id = None
         
-        if response.status_code == 200:
-            data = response.json()
-            print(f"   Response: {data}")
-            if data.get("status") == "healthy":
-                print("   ✅ Health endpoint working correctly")
-                return True
-            else:
-                print("   ❌ Health endpoint returned unexpected response")
-                return False
-        else:
-            print(f"   ❌ Health endpoint failed with status {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"   ❌ Health endpoint error: {e}")
-        return False
-
-def test_address_search_endpoint():
-    """Test the address search endpoint"""
-    print("\n🔍 Testing address search endpoint...")
-    try:
-        response = requests.get(f"{BASE_URL}/address/search", 
-                              params={"q": "parramatta"}, 
-                              timeout=10)
-        print(f"   Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"   Response type: {type(data)}")
-            print(f"   Number of results: {len(data) if isinstance(data, list) else 'Not a list'}")
-            
-            if isinstance(data, list) and len(data) > 0:
-                print(f"   Sample result: {data[0] if data else 'No results'}")
-                print("   ✅ Address search endpoint working correctly")
-                return True
-            else:
-                print("   ⚠️  Address search returned empty results (may be normal)")
-                return True  # Empty results can be normal
-        else:
-            print(f"   ❌ Address search failed with status {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"   ❌ Address search error: {e}")
-        return False
-
-def test_property_lookup_full_params():
-    """Test property lookup with full parameters"""
-    print("\n🔍 Testing property lookup with full parameters...")
-    try:
-        params = {
-            "street": "10 George Street",
-            "suburb": "Parramatta", 
-            "state": "NSW",
-            "postcode": "2150"
+    def log_result(self, test_name: str, success: bool, message: str, details: Dict = None):
+        """Log test result"""
+        result = {
+            "test": test_name,
+            "success": success,
+            "message": message,
+            "details": details or {}
         }
-        
-        response = requests.get(f"{BASE_URL}/property/lookup", 
-                              params=params, 
-                              timeout=15)
-        print(f"   Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"   Response: {json.dumps(data, indent=2)}")
-            
-            # Check required fields
-            required_fields = ["bedrooms", "bathrooms", "parking", "land_size", "property_type", "source"]
-            missing_fields = [field for field in required_fields if field not in data]
-            
-            if missing_fields:
-                print(f"   ❌ Missing required fields: {missing_fields}")
-                return False
-            
-            # Validate field values
-            bedrooms = data.get("bedrooms")
-            bathrooms = data.get("bathrooms")
-            source = data.get("source")
-            
-            if not isinstance(bedrooms, int) or not (1 <= bedrooms <= 6):
-                print(f"   ❌ Invalid bedrooms value: {bedrooms} (should be 1-6)")
-                return False
-                
-            if not isinstance(bathrooms, int) or not (1 <= bathrooms <= 6):
-                print(f"   ❌ Invalid bathrooms value: {bathrooms} (should be 1-6)")
-                return False
-                
-            if source not in ["domain.com.au", "ai_estimate", "default"]:
-                print(f"   ❌ Invalid source value: {source}")
-                return False
-            
-            print("   ✅ Property lookup with full parameters working correctly")
-            return True
-        else:
-            print(f"   ❌ Property lookup failed with status {response.status_code}")
-            try:
-                error_data = response.json()
-                print(f"   Error details: {error_data}")
-            except:
-                print(f"   Error text: {response.text}")
-            return False
-    except Exception as e:
-        print(f"   ❌ Property lookup error: {e}")
-        return False
-
-def test_property_lookup_minimal_params():
-    """Test property lookup with minimal parameters"""
-    print("\n🔍 Testing property lookup with minimal parameters...")
-    try:
-        params = {
-            "suburb": "Sydney",
-            "state": "NSW", 
-            "postcode": "2000"
-        }
-        
-        response = requests.get(f"{BASE_URL}/property/lookup", 
-                              params=params, 
-                              timeout=15)
-        print(f"   Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"   Response: {json.dumps(data, indent=2)}")
-            
-            # Check required fields
-            required_fields = ["bedrooms", "bathrooms", "parking", "land_size", "property_type", "source"]
-            missing_fields = [field for field in required_fields if field not in data]
-            
-            if missing_fields:
-                print(f"   ❌ Missing required fields: {missing_fields}")
-                return False
-            
-            print("   ✅ Property lookup with minimal parameters working correctly")
-            return True
-        else:
-            print(f"   ❌ Property lookup failed with status {response.status_code}")
-            try:
-                error_data = response.json()
-                print(f"   Error details: {error_data}")
-            except:
-                print(f"   Error text: {response.text}")
-            return False
-    except Exception as e:
-        print(f"   ❌ Property lookup error: {e}")
-        return False
-
-def test_property_lookup_different_suburbs():
-    """Test property lookup with different suburbs"""
-    print("\n🔍 Testing property lookup with different suburbs...")
-    suburbs = [
-        {"suburb": "Melbourne", "state": "VIC", "postcode": "3000"},
-        {"suburb": "Brisbane", "state": "QLD", "postcode": "4000"}
-    ]
+        self.test_results.append(result)
+        status = "✅ PASS" if success else "❌ FAIL"
+        print(f"{status}: {test_name} - {message}")
+        if details and not success:
+            print(f"   Details: {details}")
     
-    all_passed = True
-    for params in suburbs:
-        print(f"   Testing {params['suburb']}...")
+    def test_health_endpoint(self):
+        """Test the health endpoint"""
         try:
-            response = requests.get(f"{BASE_URL}/property/lookup", 
-                                  params=params, 
-                                  timeout=15)
+            response = requests.get(f"{self.base_url}/api/health", timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
-                required_fields = ["bedrooms", "bathrooms", "parking", "land_size", "property_type", "source"]
+                if data.get("status") == "healthy":
+                    self.log_result("Health Endpoint", True, "Health endpoint working correctly")
+                    return True
+                else:
+                    self.log_result("Health Endpoint", False, f"Unexpected response: {data}")
+                    return False
+            else:
+                self.log_result("Health Endpoint", False, f"HTTP {response.status_code}: {response.text}")
+                return False
+                
+        except Exception as e:
+            self.log_result("Health Endpoint", False, f"Request failed: {str(e)}")
+            return False
+    
+    def get_test_property_id(self):
+        """Get a valid property_id from the properties list"""
+        try:
+            response = requests.get(f"{self.base_url}/api/properties", headers=self.headers, timeout=10)
+            
+            if response.status_code == 200:
+                properties = response.json()
+                if properties and len(properties) > 0:
+                    self.property_id = properties[0]["property_id"]
+                    self.log_result("Get Properties", True, f"Found {len(properties)} properties, using property_id: {self.property_id}")
+                    return True
+                else:
+                    self.log_result("Get Properties", False, "No properties found in account")
+                    return False
+            elif response.status_code == 401:
+                self.log_result("Get Properties", False, "Authentication failed - invalid test token")
+                return False
+            else:
+                self.log_result("Get Properties", False, f"HTTP {response.status_code}: {response.text}")
+                return False
+                
+        except Exception as e:
+            self.log_result("Get Properties", False, f"Request failed: {str(e)}")
+            return False
+    
+    def test_csv_report_endpoint(self):
+        """Test CSV report endpoint"""
+        if not self.property_id:
+            self.log_result("CSV Report", False, "No property_id available for testing")
+            return False
+            
+        try:
+            url = f"{self.base_url}/api/reports/csv/{self.property_id}?year={TEST_YEAR}"
+            response = requests.get(url, headers=self.headers, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Validate response structure
+                required_fields = ["filename", "content_base64", "content_type"]
                 missing_fields = [field for field in required_fields if field not in data]
                 
                 if missing_fields:
-                    print(f"     ❌ {params['suburb']}: Missing fields {missing_fields}")
-                    all_passed = False
-                else:
-                    print(f"     ✅ {params['suburb']}: Valid response")
+                    self.log_result("CSV Report", False, f"Missing required fields: {missing_fields}")
+                    return False
+                
+                # Validate filename (no special chars)
+                filename = data["filename"]
+                if not filename or not filename.endswith(".csv"):
+                    self.log_result("CSV Report", False, f"Invalid filename: {filename}")
+                    return False
+                
+                # Validate content_type
+                if data["content_type"] != "text/csv":
+                    self.log_result("CSV Report", False, f"Invalid content_type: {data['content_type']}")
+                    return False
+                
+                # Validate base64 content
+                try:
+                    csv_content = base64.b64decode(data["content_base64"]).decode('utf-8')
+                    
+                    # Try to parse as CSV
+                    csv_reader = csv.reader(io.StringIO(csv_content))
+                    rows = list(csv_reader)
+                    
+                    if len(rows) < 5:  # Should have header, property info, financial summary, etc.
+                        self.log_result("CSV Report", False, f"CSV content too short: {len(rows)} rows")
+                        return False
+                    
+                    # Check for expected content
+                    csv_text = csv_content.lower()
+                    expected_content = ["propiq report", "property summary", "financial summary"]
+                    missing_content = [content for content in expected_content if content not in csv_text]
+                    
+                    if missing_content:
+                        self.log_result("CSV Report", False, f"Missing expected CSV content: {missing_content}")
+                        return False
+                    
+                    self.log_result("CSV Report", True, f"CSV report generated successfully. Filename: {filename}, Rows: {len(rows)}")
+                    return True
+                    
+                except Exception as decode_error:
+                    self.log_result("CSV Report", False, f"Failed to decode base64 content: {str(decode_error)}")
+                    return False
+                    
+            elif response.status_code == 404:
+                self.log_result("CSV Report", False, f"Property not found: {self.property_id}")
+                return False
             else:
-                print(f"     ❌ {params['suburb']}: Failed with status {response.status_code}")
-                all_passed = False
+                self.log_result("CSV Report", False, f"HTTP {response.status_code}: {response.text}")
+                return False
+                
         except Exception as e:
-            print(f"     ❌ {params['suburb']}: Error {e}")
-            all_passed = False
+            self.log_result("CSV Report", False, f"Request failed: {str(e)}")
+            return False
     
-    if all_passed:
-        print("   ✅ Property lookup with different suburbs working correctly")
-    else:
-        print("   ❌ Some suburb tests failed")
+    def test_csv_report_404(self):
+        """Test CSV report endpoint with non-existent property_id"""
+        try:
+            fake_property_id = "prop_nonexistent123"
+            url = f"{self.base_url}/api/reports/csv/{fake_property_id}?year={TEST_YEAR}"
+            response = requests.get(url, headers=self.headers, timeout=10)
+            
+            if response.status_code == 404:
+                self.log_result("CSV Report 404", True, "Correctly returns 404 for non-existent property")
+                return True
+            else:
+                self.log_result("CSV Report 404", False, f"Expected 404, got HTTP {response.status_code}")
+                return False
+                
+        except Exception as e:
+            self.log_result("CSV Report 404", False, f"Request failed: {str(e)}")
+            return False
     
-    return all_passed
-
-def test_property_lookup_no_params():
-    """Test property lookup with no parameters (should return 400)"""
-    print("\n🔍 Testing property lookup with no parameters...")
-    try:
-        response = requests.get(f"{BASE_URL}/property/lookup", timeout=10)
-        print(f"   Status: {response.status_code}")
+    def test_report_summary_endpoint(self):
+        """Test report summary endpoint"""
+        if not self.property_id:
+            self.log_result("Report Summary", False, "No property_id available for testing")
+            return False
+            
+        try:
+            url = f"{self.base_url}/api/reports/summary/{self.property_id}?year={TEST_YEAR}"
+            response = requests.get(url, headers=self.headers, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Validate required fields
+                required_fields = [
+                    "property", "year", "total_income", "total_expenses", 
+                    "net_profit_loss", "capital_growth_pct", "expense_by_category",
+                    "income_entries", "expense_entries"
+                ]
+                missing_fields = [field for field in required_fields if field not in data]
+                
+                if missing_fields:
+                    self.log_result("Report Summary", False, f"Missing required fields: {missing_fields}")
+                    return False
+                
+                # Validate data types
+                if not isinstance(data["property"], dict):
+                    self.log_result("Report Summary", False, "Property field should be a dict")
+                    return False
+                
+                if data["year"] != TEST_YEAR:
+                    self.log_result("Report Summary", False, f"Year mismatch: expected {TEST_YEAR}, got {data['year']}")
+                    return False
+                
+                numeric_fields = ["total_income", "total_expenses", "net_profit_loss", "capital_growth_pct"]
+                for field in numeric_fields:
+                    if not isinstance(data[field], (int, float)):
+                        self.log_result("Report Summary", False, f"Field {field} should be numeric, got {type(data[field])}")
+                        return False
+                
+                if not isinstance(data["expense_by_category"], dict):
+                    self.log_result("Report Summary", False, "expense_by_category should be a dict")
+                    return False
+                
+                if not isinstance(data["income_entries"], list):
+                    self.log_result("Report Summary", False, "income_entries should be a list")
+                    return False
+                
+                if not isinstance(data["expense_entries"], list):
+                    self.log_result("Report Summary", False, "expense_entries should be a list")
+                    return False
+                
+                self.log_result("Report Summary", True, 
+                    f"Report summary working correctly. Income: ${data['total_income']}, "
+                    f"Expenses: ${data['total_expenses']}, Net: ${data['net_profit_loss']}")
+                return True
+                
+            elif response.status_code == 404:
+                self.log_result("Report Summary", False, f"Property not found: {self.property_id}")
+                return False
+            else:
+                self.log_result("Report Summary", False, f"HTTP {response.status_code}: {response.text}")
+                return False
+                
+        except Exception as e:
+            self.log_result("Report Summary", False, f"Request failed: {str(e)}")
+            return False
+    
+    def test_year_comparison_endpoint(self):
+        """Test year comparison endpoint"""
+        if not self.property_id:
+            self.log_result("Year Comparison", False, "No property_id available for testing")
+            return False
+            
+        try:
+            url = f"{self.base_url}/api/reports/comparison/{self.property_id}"
+            response = requests.get(url, headers=self.headers, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Validate required fields
+                required_fields = ["property_id", "property_name", "purchase_price", "current_value", "years"]
+                missing_fields = [field for field in required_fields if field not in data]
+                
+                if missing_fields:
+                    self.log_result("Year Comparison", False, f"Missing required fields: {missing_fields}")
+                    return False
+                
+                # Validate data types
+                if data["property_id"] != self.property_id:
+                    self.log_result("Year Comparison", False, f"Property ID mismatch: expected {self.property_id}, got {data['property_id']}")
+                    return False
+                
+                if not isinstance(data["property_name"], str):
+                    self.log_result("Year Comparison", False, "property_name should be a string")
+                    return False
+                
+                numeric_fields = ["purchase_price", "current_value"]
+                for field in numeric_fields:
+                    if not isinstance(data[field], (int, float)):
+                        self.log_result("Year Comparison", False, f"Field {field} should be numeric, got {type(data[field])}")
+                        return False
+                
+                if not isinstance(data["years"], list):
+                    self.log_result("Year Comparison", False, "years should be a list")
+                    return False
+                
+                # Validate years array structure
+                if len(data["years"]) > 0:
+                    year_entry = data["years"][0]
+                    year_required_fields = ["year", "income", "expenses", "net_cashflow", "repairs", "expense_categories", "entry_count"]
+                    year_missing_fields = [field for field in year_required_fields if field not in year_entry]
+                    
+                    if year_missing_fields:
+                        self.log_result("Year Comparison", False, f"Missing fields in year entry: {year_missing_fields}")
+                        return False
+                
+                self.log_result("Year Comparison", True, 
+                    f"Year comparison working correctly. Property: {data['property_name']}, "
+                    f"Years data: {len(data['years'])} years")
+                return True
+                
+            elif response.status_code == 404:
+                self.log_result("Year Comparison", False, f"Property not found: {self.property_id}")
+                return False
+            else:
+                self.log_result("Year Comparison", False, f"HTTP {response.status_code}: {response.text}")
+                return False
+                
+        except Exception as e:
+            self.log_result("Year Comparison", False, f"Request failed: {str(e)}")
+            return False
+    
+    def run_all_tests(self):
+        """Run all tests in sequence"""
+        print(f"🚀 Starting PropIQ Backend API Tests")
+        print(f"Backend URL: {self.base_url}")
+        print(f"Test Year: {TEST_YEAR}")
+        print("=" * 60)
         
-        if response.status_code == 400:
-            print("   ✅ Property lookup correctly returns 400 for no parameters")
+        # Test health endpoint first
+        health_ok = self.test_health_endpoint()
+        
+        # Get property ID for testing
+        properties_ok = self.get_test_property_id()
+        
+        # Run reports tests if we have a property
+        if properties_ok:
+            csv_ok = self.test_csv_report_endpoint()
+            csv_404_ok = self.test_csv_report_404()
+            summary_ok = self.test_report_summary_endpoint()
+            comparison_ok = self.test_year_comparison_endpoint()
+        else:
+            print("⚠️  Skipping reports tests - no properties available")
+            csv_ok = csv_404_ok = summary_ok = comparison_ok = False
+        
+        # Summary
+        print("\n" + "=" * 60)
+        print("📊 TEST SUMMARY")
+        print("=" * 60)
+        
+        passed = sum(1 for result in self.test_results if result["success"])
+        total = len(self.test_results)
+        
+        for result in self.test_results:
+            status = "✅" if result["success"] else "❌"
+            print(f"{status} {result['test']}: {result['message']}")
+        
+        print(f"\n🎯 Results: {passed}/{total} tests passed")
+        
+        if passed == total:
+            print("🎉 ALL TESTS PASSED!")
             return True
         else:
-            print(f"   ❌ Expected 400 status, got {response.status_code}")
-            try:
-                data = response.json()
-                print(f"   Response: {data}")
-            except:
-                print(f"   Response text: {response.text}")
+            print("💥 SOME TESTS FAILED!")
             return False
-    except Exception as e:
-        print(f"   ❌ Property lookup error: {e}")
-        return False
 
 def main():
-    """Run all tests"""
-    print("🚀 Starting PropIQ Backend API Tests")
-    print(f"📍 Testing against: {BASE_URL}")
-    print("=" * 60)
-    
-    tests = [
-        ("Health Endpoint", test_health_endpoint),
-        ("Address Search", test_address_search_endpoint),
-        ("Property Lookup - Full Params", test_property_lookup_full_params),
-        ("Property Lookup - Minimal Params", test_property_lookup_minimal_params),
-        ("Property Lookup - Different Suburbs", test_property_lookup_different_suburbs),
-        ("Property Lookup - No Params", test_property_lookup_no_params),
-    ]
-    
-    results = []
-    for test_name, test_func in tests:
-        try:
-            result = test_func()
-            results.append((test_name, result))
-        except Exception as e:
-            print(f"   ❌ Test {test_name} crashed: {e}")
-            results.append((test_name, False))
-    
-    print("\n" + "=" * 60)
-    print("📊 TEST SUMMARY")
-    print("=" * 60)
-    
-    passed = 0
-    failed = 0
-    
-    for test_name, result in results:
-        status = "✅ PASS" if result else "❌ FAIL"
-        print(f"{status} - {test_name}")
-        if result:
-            passed += 1
-        else:
-            failed += 1
-    
-    print(f"\nTotal: {passed + failed} tests")
-    print(f"Passed: {passed}")
-    print(f"Failed: {failed}")
-    
-    if failed == 0:
-        print("\n🎉 All tests passed!")
-        return 0
-    else:
-        print(f"\n⚠️  {failed} test(s) failed")
-        return 1
+    """Main test runner"""
+    tester = PropIQTester()
+    success = tester.run_all_tests()
+    sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

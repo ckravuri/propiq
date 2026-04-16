@@ -177,6 +177,42 @@ backend:
           agent: "testing"
           comment: "✅ Authentication system working correctly. Unauthenticated requests to protected endpoints return 401. Test auth header 'Bearer test_session_propiq_123' works correctly and returns 200 with valid data. Property lookup endpoint correctly does NOT require authentication as specified."
 
+  - task: "CSV Report endpoint"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ CSV Report endpoint working correctly. GET /api/reports/csv/{property_id}?year=2026 returns valid JSON with filename (no special chars), content_base64 (valid base64), and content_type ('text/csv'). Base64 decodes to valid CSV with 21 rows containing PropIQ report, property summary, and financial summary sections. 404 error handling works correctly for non-existent properties."
+
+  - task: "Report Summary endpoint"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ Report Summary endpoint working correctly. GET /api/reports/summary/{property_id}?year=2026 returns all required fields: property (dict), year (2026), total_income, total_expenses, net_profit_loss, capital_growth_pct, expense_by_category (dict), income_entries (list), expense_entries (list). All data types are correct and calculations are accurate."
+
+  - task: "Year Comparison endpoint"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ Year Comparison endpoint working correctly. GET /api/reports/comparison/{property_id} returns property_id, property_name, purchase_price, current_value, and years array with 5 years of data. Each year entry contains year, income, expenses, net_cashflow, repairs, expense_categories, and entry_count fields with correct data types."
+
 frontend:
   - task: "Frontend testing not performed"
     implemented: true
@@ -198,9 +234,9 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Property lookup endpoint with full parameters"
-    - "Property lookup endpoint with minimal input"
-    - "Property lookup endpoint error handling"
+    - "CSV Report endpoint"
+    - "Report Summary endpoint"
+    - "Year Comparison endpoint"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -208,3 +244,5 @@ test_plan:
 agent_communication:
     - agent: "testing"
       message: "✅ ALL BACKEND TESTS PASSED. Property lookup endpoint is working correctly with all test scenarios. Domain.com.au scraping fails as expected (complex web scraping), but AI estimation fallback works perfectly. All existing endpoints (health, address search) continue to work. Authentication system properly protects endpoints while allowing public access to property lookup. No critical issues found. Backend API is ready for production use."
+    - agent: "testing"
+      message: "✅ REPORTS ENDPOINTS TESTING COMPLETE. All Reports endpoints working perfectly: 1) CSV Report endpoint generates valid CSV files with proper base64 encoding and filename sanitization, correctly handles 404 errors. 2) Report Summary endpoint returns all required fields with correct data types and accurate calculations. 3) Year Comparison endpoint provides 5 years of historical data with complete financial metrics. 4) Health endpoint continues working. Authentication system properly protects all endpoints. All 6 tests passed successfully. Backend API is fully functional and ready for production."
