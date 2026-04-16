@@ -199,10 +199,9 @@ export default function ReportsScreen() {
   const generateCSV = async (propertyId: string, propertyName: string) => {
     setGenerating(propertyId + '_csv');
     try {
-      const data = await apiGet(`/reports/csv/${propertyId}?year=${currentYear}`);
-      
       if (Platform.OS === 'web') {
-        // Web: decode base64 and download
+        // Web: use the base64 endpoint and create a download link
+        const data = await apiGet(`/reports/csv/${propertyId}?year=${currentYear}`);
         const csvContent = atob(data.content_base64);
         const blob = new Blob([csvContent], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
@@ -212,13 +211,29 @@ export default function ReportsScreen() {
         a.click();
         URL.revokeObjectURL(url);
       } else {
-        // Mobile: write base64 directly to file then share
-        const fileUri = FileSystem.documentDirectory + data.filename;
-        await FileSystem.writeAsStringAsync(fileUri, data.content_base64, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+        // Mobile: download the CSV file directly from the server
+        const token = await require('@react-native-async-storage/async-storage').default.getItem('session_token');
+        const baseUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+        const downloadUrl = `${baseUrl}/api/reports/csv-download/${propertyId}?year=${currentYear}`;
+        
+        const safeName = propertyName.replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_');
+        const filename = `PropIQ_${safeName}_${currentYear}.csv`;
+        const fileUri = FileSystem.documentDirectory + filename;
+        
+        const downloadResult = await FileSystem.downloadAsync(
+          downloadUrl,
+          fileUri,
+          {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          }
+        );
+        
+        if (downloadResult.status !== 200) {
+          throw new Error(`Download failed with status ${downloadResult.status}`);
+        }
+        
         if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(fileUri, {
+          await Sharing.shareAsync(downloadResult.uri, {
             mimeType: 'text/csv',
             dialogTitle: `Export ${propertyName} Report`,
             UTI: 'public.comma-separated-values-text',

@@ -589,6 +589,61 @@ async def generate_csv_report(property_id: str, request: Request, year: int = Qu
     safe_name = re.sub(r'[^\w\s-]', '', prop.get('property_name', 'report')).strip().replace(' ', '_')
     return {"filename": f"PropIQ_{safe_name}_{year}.csv", "content_base64": csv_b64, "content_type": "text/csv"}
 
+
+@api_router.get("/reports/csv-download/{property_id}")
+async def download_csv_report(property_id: str, request: Request, year: int = Query(default=None)):
+    """Returns raw CSV file as a direct download"""
+    user = await get_current_user(request)
+    if year is None:
+        year = datetime.now(timezone.utc).year
+    prop = await db.properties.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    year_start = f"{year}-01-01"
+    year_end = f"{year}-12-31"
+    income = await db.income_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": year_start, "$lte": year_end}}, {"_id": 0}).to_list(10000)
+    expenses = await db.expense_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": year_start, "$lte": year_end}}, {"_id": 0}).to_list(10000)
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([f"PropIQ Report - {prop.get('property_name', '')} - {year}"])
+    writer.writerow([])
+    writer.writerow(["Property Summary"])
+    writer.writerow(["Field", "Value"])
+    writer.writerow(["Name", prop.get("property_name", "")])
+    writer.writerow(["Address", f"{prop.get('address', '')} {prop.get('suburb', '')} {prop.get('state', '')} {prop.get('postcode', '')}"])
+    writer.writerow(["Purchase Price", prop.get("purchase_price", 0)])
+    writer.writerow(["Current Value", prop.get("current_estimated_value", 0)])
+    writer.writerow(["Loan Amount", prop.get("loan_amount", 0)])
+    writer.writerow([])
+    total_income = sum(i.get("amount", 0) for i in income)
+    total_expenses = sum(e.get("amount", 0) for e in expenses)
+    writer.writerow(["Financial Summary"])
+    writer.writerow(["Total Income", total_income])
+    writer.writerow(["Total Expenses", total_expenses])
+    writer.writerow(["Net Profit/Loss", total_income - total_expenses])
+    writer.writerow([])
+    writer.writerow(["Income Entries"])
+    writer.writerow(["Date", "Amount", "Type", "Frequency", "Tenant", "Notes"])
+    for i in income:
+        writer.writerow([i.get("date", ""), i.get("amount", 0), i.get("income_type", ""), i.get("frequency", ""), i.get("tenant_name", ""), i.get("notes", "")])
+    writer.writerow([])
+    writer.writerow(["Expense Entries"])
+    writer.writerow(["Date", "Amount", "Category", "Recurring", "Frequency", "Notes"])
+    for e in expenses:
+        writer.writerow([e.get("date", ""), e.get("amount", 0), e.get("category", ""), e.get("recurring", False), e.get("frequency", ""), e.get("notes", "")])
+    
+    csv_content = output.getvalue()
+    safe_name = re.sub(r'[^\w\s-]', '', prop.get('property_name', 'report')).strip().replace(' ', '_')
+    filename = f"PropIQ_{safe_name}_{year}.csv"
+    
+    from starlette.responses import StreamingResponse
+    return StreamingResponse(
+        iter([csv_content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
 @api_router.get("/reports/summary/{property_id}")
 async def get_report_summary(property_id: str, request: Request, year: int = Query(default=None)):
     user = await get_current_user(request)
