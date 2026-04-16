@@ -362,10 +362,11 @@ async def delete_expense(expense_id: str, request: Request):
 async def list_reminders(request: Request):
     user = await get_current_user(request)
     reminders = await db.reminders.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_date", -1).to_list(1000)
-    # Enrich with property names
+    # Batch load property names to avoid N+1 queries
+    properties = await db.properties.find({"user_id": user["user_id"]}, {"_id": 0, "property_id": 1, "property_name": 1}).to_list(1000)
+    prop_map = {p["property_id"]: p.get("property_name", "") for p in properties}
     for r in reminders:
-        prop = await db.properties.find_one({"property_id": r.get("property_id"), "user_id": user["user_id"]}, {"_id": 0, "property_name": 1})
-        r["property_name"] = prop.get("property_name", "") if prop else ""
+        r["property_name"] = prop_map.get(r.get("property_id"), "")
     return reminders
 
 @api_router.post("/reminders", response_model=ReminderOut)
