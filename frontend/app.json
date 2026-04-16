@@ -4,7 +4,7 @@
     "slug": "propiq",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/app-icon-1024.png",
     "scheme": "propiq",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
