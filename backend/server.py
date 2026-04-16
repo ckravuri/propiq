@@ -1015,11 +1015,21 @@ async def search_address(q: str = Query(..., min_length=3)):
                 
                 house_number = props.get("housenumber", "")
                 street_name = props.get("street", props.get("name", ""))
-                suburb = props.get("city", props.get("locality", props.get("district", "")))
+                
+                # In Australian data: district = suburb (e.g. Sebastopol), city = sub-locality (e.g. Bonshaw)
+                district = props.get("district", "")
+                city = props.get("city", props.get("locality", ""))
+                # Use district as suburb if available (more recognizable to users), fallback to city
+                suburb = district if district else city
+                
                 state = props.get("state", "")
                 postcode = props.get("postcode", "")
                 
                 street_full = f"{house_number} {street_name}".strip()
+                if not street_full or street_full == street_name:
+                    # Skip results with no house number if user typed a number
+                    if q and q[0].isdigit() and not house_number:
+                        continue
                 
                 # Build clean display
                 parts = [p for p in [street_full, suburb, state, postcode] if p]
