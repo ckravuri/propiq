@@ -888,63 +888,109 @@ async def _scrape_domain_for_property(full_address: str) -> Optional[dict]:
         return None
 
 
-async def _ai_estimate_property(street: str, suburb: str, state: str, postcode: str) -> Optional[dict]:
-    """Use GPT-5.2 via Emergent LLM Key to estimate property details"""
-    if not EMERGENT_LLM_KEY:
+async def _search_property_details(street: str, suburb: str, state: str, postcode: str) -> Optional[dict]:
+    """Search for real property details using web search + AI extraction"""
+    full_addr = f"{street}, {suburb} {state} {postcode}"
+    
+    # Step 1: Search for the property using DuckDuckGo Lite
+    snippets_text = ""
+    try:
+        search_query = f'"{street}" {suburb} {state} {postcode} bedrooms bathrooms property'
+        async with httpx.AsyncClient(timeout=8.0) as http_client:
+            resp = await http_client.get(
+                "https://lite.duckduckgo.com/lite/",
+                params={"q": search_query},
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            )
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            snippets = soup.find_all('td', class_='result-snippet')
+            snippets_text = "\n".join([s.get_text(strip=True)[:300] for s in snippets[:6]])
+            logger.info(f"Search found {len(snippets)} snippets for: {full_addr}")
+    except Exception as e:
+        logger.warning(f"Web search error: {type(e).__name__}")
+    
+    if not snippets_text:
         return None
     
-    try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        
-        full_addr = f"{street}, {suburb}, {state} {postcode}, Australia"
-        prompt = f"""Given this Australian property address, provide your best estimate of the property specifications.
-
-Address: {full_addr}
-
-IMPORTANT RULES:
-- This is an EXISTING residential property in Australia at the given address
-- Consider the specific suburb "{suburb}" in {state} (postcode {postcode}) and what type of housing is typical there
-- Inner city suburbs (CBD, close to city) tend to have apartments/units with fewer bedrooms
-- Outer suburbs and regional areas tend to have houses with more bedrooms and land
-- New estates (postcodes 3000s-3100s in VIC, 2700s-2900s in NSW) often have 3-4 bedroom houses on small blocks (300-450m²)  
-- Older established suburbs often have 3 bedroom houses on larger blocks (500-800m²)
-- If street name contains "Circuit", "Crescent", "Way", "Drive" it is likely a newer housing estate
-- If street name contains "Road", "Street", "Avenue" it could be older or mixed
-- Units/apartments have 0 land size and typically 1-2 bedrooms
-
-Respond with ONLY a valid JSON object:
-{{"bedrooms": <int>, "bathrooms": <int>, "parking": <int>, "land_size": <int in m², 0 for apartments>, "property_type": "<house|apartment|townhouse|unit|villa|duplex>"}}"""
-
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"prop_lookup_{uuid.uuid4().hex[:8]}",
-            system_message="You are an Australian real estate data assistant. You provide accurate property specifications based on address location. Respond with JSON only, no explanation."
-        )
-        chat.with_model("openai", "gpt-5.2")
-        
-        user_message = UserMessage(text=prompt)
-        response = await chat.send_message(user_message)
-        
-        # Parse the JSON response
-        import json
-        response_text = response.strip()
-        # Remove markdown code blocks if present
-        if response_text.startswith("```"):
-            response_text = re.sub(r'^```(?:json)?\s*', '', response_text)
-            response_text = re.sub(r'\s*```$', '', response_text)
-        
-        data = json.loads(response_text)
-        return {
-            "bedrooms": int(data.get("bedrooms", 3)),
-            "bathrooms": int(data.get("bathrooms", 1)),
-            "parking": int(data.get("parking", 1)),
-            "land_size": float(data.get("land_size", 0)),
-            "property_type": str(data.get("property_type", "house")),
-            "source": "ai_estimate",
+    # Step 2: Try to extract property data directly from snippets using regex
+    beds_match = re.search(r'(\d+)\s*(?:bed(?:room)?s?)', snippets_text, re.IGNORECASE)
+    baths_match = re.search(r'(\d+)\s*(?:bath(?:room)?s?)', snippets_text, re.IGNORECASE)
+    parking_match = re.search(r'(\d+)\s*(?:parking|car\s*(?:space|port|garage)s?)', snippets_text, re.IGNORECASE)
+    land_match = re.search(r'(?:land\s*(?:size|area)?\s*(?:of|is)?\s*)?(\d[\d,]*)\s*m[²2]', snippets_text, re.IGNORECASE)
+    
+    # Determine property type - look for explicit statements like "is a House" or "property type: house"
+    prop_type = "house"
+    text_lower = snippets_text.lower()
+    # Look for strong indicators first (e.g. "is a house", "is a townhouse")
+    type_match = re.search(r'is\s+(?:a|an)\s+(house|apartment|unit|townhouse|villa|duplex|flat)', text_lower)
+    if type_match:
+        t = type_match.group(1)
+        if t in ("unit", "flat"):
+            prop_type = "apartment"
+        else:
+            prop_type = t
+    elif "townhouse" in text_lower and "house" not in text_lower.replace("townhouse", ""):
+        prop_type = "townhouse"
+    elif ("apartment" in text_lower or "unit" in text_lower or "flat" in text_lower) and "house" not in text_lower:
+        prop_type = "apartment"
+    
+    if beds_match or baths_match:
+        result = {
+            "bedrooms": int(beds_match.group(1)) if beds_match else 0,
+            "bathrooms": int(baths_match.group(1)) if baths_match else 0,
+            "parking": int(parking_match.group(1)) if parking_match else 0,
+            "land_size": float(land_match.group(1).replace(',', '')) if land_match else 0,
+            "property_type": prop_type,
+            "source": "property_data",
         }
-    except Exception as e:
-        logger.error(f"AI property estimate error: {e}")
-        return None
+        logger.info(f"Extracted property data: {result}")
+        return result
+    
+    # Step 3: If regex extraction failed, use AI to parse the snippets
+    if EMERGENT_LLM_KEY:
+        try:
+            from emergentintegrations.llm.chat import LlmChat, UserMessage
+            import json as json_module
+            
+            prompt = f"""Extract the property details from these search results about {full_addr}:
+
+{snippets_text}
+
+Return ONLY a JSON object with the ACTUAL data found (not estimates):
+{{"bedrooms": <number>, "bathrooms": <number>, "parking": <number>, "land_size": <number in m²>, "property_type": "<house|apartment|townhouse|unit|villa|duplex>"}}
+
+If the data is not in the search results, return: {{"error": "not_found"}}"""
+
+            chat = LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"prop_extract_{uuid.uuid4().hex[:8]}",
+                system_message="Extract structured property data from search result snippets. Return JSON only."
+            )
+            chat.with_model("openai", "gpt-5.2")
+            response = await chat.send_message(UserMessage(text=prompt))
+            
+            response_text = response.strip()
+            if response_text.startswith("```"):
+                response_text = re.sub(r'^```(?:json)?\s*', '', response_text)
+                response_text = re.sub(r'\s*```$', '', response_text)
+            
+            data = json_module.loads(response_text)
+            if data.get("error") == "not_found":
+                return None
+            
+            return {
+                "bedrooms": int(data.get("bedrooms", 0)),
+                "bathrooms": int(data.get("bathrooms", 0)),
+                "parking": int(data.get("parking", 0)),
+                "land_size": float(data.get("land_size", 0)),
+                "property_type": str(data.get("property_type", "house")),
+                "source": "property_data",
+            }
+        except Exception as e:
+            logger.warning(f"AI extraction error: {type(e).__name__}")
+    
+    return None
 
 
 @api_router.get("/property/lookup")
@@ -954,21 +1000,21 @@ async def lookup_property_details(
     state: str = Query(""),
     postcode: str = Query(""),
 ):
-    """Look up property details using AI estimation based on address"""
+    """Look up real property details by searching property websites"""
     if not suburb and not street:
         raise HTTPException(status_code=400, detail="At least suburb or street required")
     
     full_address = f"{street}, {suburb} {state} {postcode}".strip(", ")
     logger.info(f"Looking up property details for: {full_address}")
     
-    # Use AI estimation (domain.com.au scraping removed - always blocked/timed out)
-    ai_result = await _ai_estimate_property(street, suburb, state, postcode)
+    # Search web for real property data
+    result = await _search_property_details(street, suburb, state, postcode)
     
-    if ai_result:
-        logger.info(f"AI estimated property data: {ai_result}")
-        return ai_result
+    if result:
+        logger.info(f"Found real property data: {result}")
+        return result
     
-    # Return sensible defaults if AI fails
+    # Return sensible defaults if search fails
     return {
         "bedrooms": 3,
         "bathrooms": 1,
