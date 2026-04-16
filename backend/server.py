@@ -897,24 +897,28 @@ async def _ai_estimate_property(street: str, suburb: str, state: str, postcode: 
         from emergentintegrations.llm.chat import LlmChat, UserMessage
         
         full_addr = f"{street}, {suburb}, {state} {postcode}, Australia"
-        prompt = f"""You are an Australian property data expert. Based on the address below, estimate the most likely property details.
+        prompt = f"""Given this Australian property address, provide your best estimate of the property specifications.
+
 Address: {full_addr}
 
-Respond ONLY with a valid JSON object (no markdown, no explanation) with these exact keys:
-{{
-  "bedrooms": <number 1-6>,
-  "bathrooms": <number 1-4>,
-  "parking": <number 0-4>,
-  "land_size": <number in square meters, 0 if apartment/unit>,
-  "property_type": "<house|apartment|townhouse|land|villa|duplex>"
-}}
+IMPORTANT RULES:
+- This is an EXISTING residential property in Australia at the given address
+- Consider the specific suburb "{suburb}" in {state} (postcode {postcode}) and what type of housing is typical there
+- Inner city suburbs (CBD, close to city) tend to have apartments/units with fewer bedrooms
+- Outer suburbs and regional areas tend to have houses with more bedrooms and land
+- New estates (postcodes 3000s-3100s in VIC, 2700s-2900s in NSW) often have 3-4 bedroom houses on small blocks (300-450m²)  
+- Older established suburbs often have 3 bedroom houses on larger blocks (500-800m²)
+- If street name contains "Circuit", "Crescent", "Way", "Drive" it is likely a newer housing estate
+- If street name contains "Road", "Street", "Avenue" it could be older or mixed
+- Units/apartments have 0 land size and typically 1-2 bedrooms
 
-Consider the suburb, postcode, and typical housing stock in that area. Use your knowledge of Australian suburbs to give the most common/median property type for that location."""
+Respond with ONLY a valid JSON object:
+{{"bedrooms": <int>, "bathrooms": <int>, "parking": <int>, "land_size": <int in m², 0 for apartments>, "property_type": "<house|apartment|townhouse|unit|villa|duplex>"}}"""
 
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"prop_lookup_{uuid.uuid4().hex[:8]}",
-            system_message="You are a concise Australian property data expert. Respond only with JSON."
+            system_message="You are an Australian real estate data assistant. You provide accurate property specifications based on address location. Respond with JSON only, no explanation."
         )
         chat.with_model("openai", "gpt-5.2")
         
@@ -950,29 +954,21 @@ async def lookup_property_details(
     state: str = Query(""),
     postcode: str = Query(""),
 ):
-    """Look up property details from domain.com.au or AI estimation"""
+    """Look up property details using AI estimation based on address"""
     if not suburb and not street:
         raise HTTPException(status_code=400, detail="At least suburb or street required")
     
     full_address = f"{street}, {suburb} {state} {postcode}".strip(", ")
-    
-    # 1. Try domain.com.au scraping
     logger.info(f"Looking up property details for: {full_address}")
-    result = await _scrape_domain_for_property(f"{suburb}-{state}-{postcode}")
     
-    if result:
-        logger.info(f"Found property data from domain.com.au: {result}")
-        return result
-    
-    # 2. Fallback to AI estimation
-    logger.info("Domain.com.au lookup failed, trying AI estimation...")
+    # Use AI estimation (domain.com.au scraping removed - always blocked/timed out)
     ai_result = await _ai_estimate_property(street, suburb, state, postcode)
     
     if ai_result:
         logger.info(f"AI estimated property data: {ai_result}")
         return ai_result
     
-    # 3. Return sensible defaults if all else fails
+    # Return sensible defaults if AI fails
     return {
         "bedrooms": 3,
         "bathrooms": 1,
