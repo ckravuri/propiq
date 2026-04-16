@@ -986,6 +986,12 @@ async def search_address(q: str = Query(..., min_length=3)):
     """Australian address autocomplete using multiple sources for accuracy"""
     results = []
     
+    # Extract house number from query if user typed one (e.g. "13 ainsworth street mawson")
+    user_house_number = ""
+    query_match = re.match(r'^(\d+[a-zA-Z]?)\s+(.+)', q.strip())
+    if query_match:
+        user_house_number = query_match.group(1)
+    
     # Source 1: Photon (Komoot) - better autocomplete behavior
     try:
         async with httpx.AsyncClient() as http_client:
@@ -1012,20 +1018,19 @@ async def search_address(q: str = Query(..., min_length=3)):
                 house_number = props.get("housenumber", "")
                 street_name = props.get("street", props.get("name", ""))
                 
-                # In Australian data: district = suburb (e.g. Sebastopol), city = sub-locality (e.g. Bonshaw)
+                # If Photon didn't return a house number but user typed one, use user's number
+                if not house_number and user_house_number and street_name:
+                    house_number = user_house_number
+                
+                # In Australian data: district = suburb, city = sub-locality
                 district = props.get("district", "")
                 city = props.get("city", props.get("locality", ""))
-                # Use district as suburb if available (more recognizable to users), fallback to city
                 suburb = district if district else city
                 
                 state = props.get("state", "")
                 postcode = props.get("postcode", "")
                 
                 street_full = f"{house_number} {street_name}".strip()
-                if not street_full or street_full == street_name:
-                    # Skip results with no house number if user typed a number
-                    if q and q[0].isdigit() and not house_number:
-                        continue
                 
                 # Build clean display
                 parts = [p for p in [street_full, suburb, state, postcode] if p]
@@ -1066,6 +1071,11 @@ async def search_address(q: str = Query(..., min_length=3)):
                     addr = r.get("address", {})
                     house_number = addr.get("house_number", "")
                     road = addr.get("road", "")
+                    
+                    # If Nominatim didn't return a house number but user typed one, use user's number
+                    if not house_number and user_house_number and road:
+                        house_number = user_house_number
+                    
                     street_full = f"{house_number} {road}".strip()
                     suburb = addr.get("suburb", addr.get("town", addr.get("city", addr.get("village", ""))))
                     state = addr.get("state", "")
@@ -1088,8 +1098,17 @@ async def search_address(q: str = Query(..., min_length=3)):
         except Exception as e:
             logger.warning(f"Nominatim search error: {type(e).__name__}")
     
+    # Deduplicate by normalizing — remove duplicates where street+suburb+postcode match
+    seen = set()
+    unique_results = []
+    for r in results:
+        key = f"{r['street']}|{r['suburb']}|{r['postcode']}".lower()
+        if key not in seen:
+            seen.add(key)
+            unique_results.append(r)
+    
     # Return top 6 unique results
-    return results[:6]
+    return unique_results[:6]
 
 @api_router.get("/")
 async def root():
