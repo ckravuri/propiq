@@ -6,7 +6,15 @@ interface AdBannerProps {
   size?: 'banner' | 'large';
 }
 
-// Web version: Always shows placeholder since AdMob requires native builds
+// AdMob is configured in app.json with your real IDs:
+// Android App: ca-app-pub-9480363771925708~5991057846
+// iOS App: ca-app-pub-9480363771925708~9063109596
+// Android Banner: ca-app-pub-9480363771925708/9307473013
+// iOS Banner: ca-app-pub-9480363771925708/1516626218
+//
+// Real ads will show automatically in EAS production builds.
+// In Expo Go and web preview, this placeholder is shown.
+
 export default function AdBanner({ size = 'banner' }: AdBannerProps) {
   const { colors } = useTheme();
   const height = size === 'large' ? 100 : 60;
