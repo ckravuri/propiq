@@ -59,7 +59,8 @@ export default function SettingsScreen() {
         <View style={[styles.settingGroup, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <SettingRow icon="alarm" label="Bill Reminders" value="Manage recurring bills" onPress={() => router.push('/reminders')} />
           <SettingRow icon="notifications" label="Notifications" value="Enabled" />
-          <SettingRow icon="shield-checkmark" label="Privacy" value="Standard" />
+          <SettingRow icon="shield-checkmark" label="Privacy Policy" value="Data protection & rights" onPress={() => router.push('/privacy')} />
+          <SettingRow icon="lock-closed" label="Security Policy" value="Cybersecurity standards" onPress={() => router.push('/security')} />
           <SettingRow icon="help-circle" label="Help & Support" />
           <SettingRow icon="information-circle" label="About PropIQ" value="Version 1.0.0" />
         </View>

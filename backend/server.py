@@ -1164,6 +1164,43 @@ async def root():
 async def health():
     return {"status": "healthy"}
 
+from starlette.responses import HTMLResponse
+
+@api_router.get("/privacy-policy", response_class=HTMLResponse)
+async def privacy_policy_web():
+    """Web-accessible privacy policy page (required for App Store / Play Store)"""
+    return HTMLResponse(content="""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>PropIQ - Privacy Policy</title>
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:800px;margin:0 auto;padding:20px 24px;color:#1C1917;line-height:1.7}h1{color:#1C3F35;border-bottom:2px solid #1C3F35;padding-bottom:10px}h2{color:#1C3F35;margin-top:28px}p,ul{font-size:15px;color:#44403C}.updated{color:#78716C;font-style:italic;font-size:13px}</style></head><body>
+<h1>PropIQ Privacy Policy</h1><p class="updated">Last Updated: April 2026</p>
+<h2>1. Introduction</h2><p>PropIQ ("we", "our", "us") is committed to protecting the privacy and security of your personal information. This Privacy Policy explains how we collect, use, store, and protect your data when you use the PropIQ mobile application ("App").</p>
+<h2>2. Information We Collect</h2><ul><li><b>Account Information:</b> Name and email via Google Sign-In</li><li><b>Property Data:</b> Addresses, prices, valuations, specifications, photos</li><li><b>Financial Data:</b> Income, expenses, receipts, bill reminders</li><li><b>Usage Data:</b> App interaction logs, device type, crash reports</li></ul><p>We do NOT collect passwords, location data, contacts, or data from other apps.</p>
+<h2>3. How We Use Your Data</h2><p>Your data is used solely to provide property tracking, financial calculations, reporting, and bill reminders. We do NOT sell or share your data with third parties for marketing.</p>
+<h2>4. Data Storage & Security</h2><p>All data is encrypted in transit (TLS/SSL) and at rest (AES-256). We use session-based authentication, access controls, and regular security audits.</p>
+<h2>5. Third-Party Services</h2><ul><li>Google Sign-In (authentication)</li><li>Google AdMob (advertising)</li><li>OpenStreetMap/Photon (address autocomplete)</li></ul>
+<h2>6. Data Retention</h2><p>Data is retained while your account is active. Upon deletion request, all data is permanently removed within 30 days.</p>
+<h2>7. Your Rights</h2><p>You may access, export (CSV/PDF), correct, or request deletion of your data. Contact: privacy@propiq.app</p>
+<h2>8. Children's Privacy</h2><p>PropIQ is not intended for individuals under 18.</p>
+<h2>9. Advertising</h2><p>PropIQ uses Google AdMob. You can opt out of personalized ads via device settings. We do not share property/financial data with advertisers.</p>
+<h2>10. Changes</h2><p>We may update this policy. Changes will be posted within the App.</p>
+<h2>11. Contact</h2><p>Privacy: privacy@propiq.app | Data Deletion: delete@propiq.app</p>
+</body></html>""")
+
+@api_router.get("/security-policy", response_class=HTMLResponse)
+async def security_policy_web():
+    """Web-accessible security policy page"""
+    return HTMLResponse(content="""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>PropIQ - Security Policy</title>
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:800px;margin:0 auto;padding:20px 24px;color:#1C1917;line-height:1.7}h1{color:#1C3F35;border-bottom:2px solid #1C3F35;padding-bottom:10px}h2{color:#1C3F35;margin-top:28px}p,ul{font-size:15px;color:#44403C}.updated{color:#78716C;font-style:italic;font-size:13px}</style></head><body>
+<h1>PropIQ Security Policy</h1><p class="updated">Last Updated: April 2026</p>
+<h2>1. Overview</h2><p>PropIQ implements industry-standard cybersecurity measures to ensure confidentiality, integrity, and availability of all user data.</p>
+<h2>2. Authentication</h2><ul><li>OAuth 2.0 via Google Sign-In</li><li>Session tokens with 24-hour expiration</li><li>No passwords stored</li><li>Server-side validation on every request</li></ul>
+<h2>3. Encryption</h2><ul><li>TLS 1.2+ for all data in transit</li><li>AES-256 for data at rest</li><li>HTTPS enforced on all endpoints</li></ul>
+<h2>4. Infrastructure</h2><ul><li>Enterprise-grade cloud hosting</li><li>Network isolation and firewalls</li><li>DDoS protection</li><li>Automated encrypted backups</li></ul>
+<h2>5. Application Security</h2><ul><li>Input validation and sanitization</li><li>Protection against SQL injection, XSS, CSRF</li><li>Rate limiting on API endpoints</li><li>Regular dependency vulnerability scanning</li></ul>
+<h2>6. Incident Response</h2><p>Immediate containment, user notification within 72 hours of confirmed breach, root cause analysis, and post-incident review.</p>
+<h2>7. Compliance</h2><ul><li>Australian Privacy Act 1988 & APPs</li><li>OWASP Top 10 guidelines</li><li>App Store & Play Store security requirements</li></ul>
+<h2>8. Contact</h2><p>Report vulnerabilities: security@propiq.app (48-hour response time)</p>
+</body></html>""")
+
 # Include router
 app.include_router(api_router)
 
