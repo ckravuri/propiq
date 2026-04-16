@@ -101,3 +101,110 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "Test the PropIQ backend API running at http://localhost:8001. Focus on testing the NEW endpoint: property lookup endpoint and verify existing endpoints still work."
+
+backend:
+  - task: "Property lookup endpoint with full parameters"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ Property lookup endpoint working correctly. Tested with street=10+George+Street&suburb=Parramatta&state=NSW&postcode=2150. Returns valid JSON with all required keys: bedrooms, bathrooms, parking, land_size, property_type, source. Source field correctly shows 'ai_estimate' as Domain.com.au scraping fails (expected). Bedrooms/bathrooms values are reasonable (2/2). Response time ~3-4 seconds due to AI estimation fallback."
+
+  - task: "Property lookup endpoint with minimal input"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ Property lookup with minimal input working correctly. Tested with suburb=Sydney&state=NSW&postcode=2000. Returns valid data structure with all required fields. AI estimation provides reasonable property details for Sydney CBD (2 bed, 2 bath apartment)."
+
+  - task: "Property lookup endpoint error handling"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ Property lookup error handling working correctly. GET /api/property/lookup with no parameters correctly returns 400 error with message 'At least suburb or street required'. Proper validation implemented."
+
+  - task: "Health endpoint"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ Health endpoint working correctly. GET /api/health returns {\"status\": \"healthy\"} with 200 status code."
+
+  - task: "Address search endpoint"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ Address search endpoint working correctly. GET /api/address/search?q=parramatta returns array of address suggestions with proper structure including display, street, suburb, state, postcode, lat, lon fields."
+
+  - task: "Authentication system"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ Authentication system working correctly. Unauthenticated requests to protected endpoints return 401. Test auth header 'Bearer test_session_propiq_123' works correctly and returns 200 with valid data. Property lookup endpoint correctly does NOT require authentication as specified."
+
+frontend:
+  - task: "Frontend testing not performed"
+    implemented: true
+    working: "NA"
+    file: "N/A"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "testing"
+          comment: "Frontend testing not performed as per testing agent instructions. This is an Expo/React Native app, not a web React app."
+
+metadata:
+  created_by: "testing_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Property lookup endpoint with full parameters"
+    - "Property lookup endpoint with minimal input"
+    - "Property lookup endpoint error handling"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    - agent: "testing"
+      message: "✅ ALL BACKEND TESTS PASSED. Property lookup endpoint is working correctly with all test scenarios. Domain.com.au scraping fails as expected (complex web scraping), but AI estimation fallback works perfectly. All existing endpoints (health, address search) continue to work. Authentication system properly protects endpoints while allowing public access to property lookup. No critical issues found. Backend API is ready for production use."

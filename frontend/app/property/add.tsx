@@ -43,6 +43,10 @@ export default function AddPropertyScreen() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [searchingAddr, setSearchingAddr] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
+  // Property detail lookup
+  const [fetchingDetails, setFetchingDetails] = useState(false);
+  const [detailSource, setDetailSource] = useState<string | null>(null);
 
   useEffect(() => {
     if (isEdit) {
@@ -97,7 +101,7 @@ export default function AddPropertyScreen() {
     }, 400);
   }, [update]);
 
-  const selectAddress = useCallback((addr: AddressSuggestion) => {
+  const selectAddress = useCallback(async (addr: AddressSuggestion) => {
     const stateAbbr = AU_STATE_MAP[addr.state] || addr.state;
     setForm(prev => ({
       ...prev,
@@ -108,6 +112,34 @@ export default function AddPropertyScreen() {
     }));
     setSuggestions([]);
     setShowSuggestions(false);
+    
+    // Fetch property details from backend
+    setFetchingDetails(true);
+    setDetailSource(null);
+    try {
+      const params = new URLSearchParams({
+        street: addr.street || '',
+        suburb: addr.suburb || '',
+        state: stateAbbr || '',
+        postcode: addr.postcode || '',
+      });
+      const details = await apiGet(`/property/lookup?${params.toString()}`);
+      if (details && details.source !== 'default') {
+        setForm(prev => ({
+          ...prev,
+          bedrooms: String(details.bedrooms || prev.bedrooms),
+          bathrooms: String(details.bathrooms || prev.bathrooms),
+          parking: String(details.parking || prev.parking),
+          land_size: details.land_size ? String(details.land_size) : prev.land_size,
+          property_type: details.property_type || prev.property_type,
+        }));
+        setDetailSource(details.source === 'ai_estimate' ? 'AI Estimate' : details.source === 'domain.com.au' ? 'domain.com.au' : null);
+      }
+    } catch (e) {
+      console.log('Property lookup failed (non-blocking):', e);
+    } finally {
+      setFetchingDetails(false);
+    }
   }, []);
 
   const pickImage = async (source: 'library' | 'camera') => {
@@ -345,6 +377,24 @@ export default function AddPropertyScreen() {
 
           {/* SPECIFICATIONS */}
           <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>SPECIFICATIONS</Text>
+          
+          {/* Property detail fetch indicator */}
+          {fetchingDetails && (
+            <View style={[styles.detailBanner, { backgroundColor: colors.primary + '15', borderColor: colors.primary + '30' }]}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={[styles.detailBannerText, { color: colors.primary }]}>
+                Looking up property details...
+              </Text>
+            </View>
+          )}
+          {detailSource && !fetchingDetails && (
+            <View style={[styles.detailBanner, { backgroundColor: '#E8F5E9', borderColor: '#A5D6A7' }]}>
+              <Ionicons name="checkmark-circle" size={16} color="#2E7D32" />
+              <Text style={[styles.detailBannerText, { color: '#2E7D32' }]}>
+                Details auto-filled from {detailSource} — feel free to edit
+              </Text>
+            </View>
+          )}
           <View style={styles.row}>
             {[
               { label: 'Bedrooms', key: 'bedrooms' },
@@ -416,4 +466,7 @@ const styles = StyleSheet.create({
   suggestionRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 14 },
   suggestionStreet: { fontSize: 14, fontWeight: '600' },
   suggestionDetail: { fontSize: 12, marginTop: 1 },
+  // Property detail banner
+  detailBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, marginBottom: 12 },
+  detailBannerText: { fontSize: 13, fontWeight: '500', flex: 1 },
 });

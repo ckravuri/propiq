@@ -13,6 +13,8 @@ import httpx
 import io
 import csv
 import base64
+import re
+from bs4 import BeautifulSoup
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -772,7 +774,159 @@ Keep it concise and actionable. Format with bullet points."""
         logger.error(f"AI insights error: {e}")
         raise HTTPException(status_code=500, detail=f"AI service error: {str(e)}")
 
-# ==================== HEALTH CHECK ====================
+# ==================== PROPERTY LOOKUP (Domain.com.au + AI Fallback) ====================
+
+async def _scrape_domain_for_property(full_address: str) -> Optional[dict]:
+    """Try to find property details on domain.com.au via search"""
+    try:
+        import urllib.parse
+        encoded = urllib.parse.quote_plus(full_address)
+        url = f"https://www.domain.com.au/sale/{encoded.replace('+', '-').lower()}/"
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-AU,en;q=0.5",
+        }
+        
+        # Try suburb-based listing search
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            resp = await http_client.get(url, headers=headers, follow_redirects=True)
+            
+            if resp.status_code != 200:
+                return None
+            
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            text = soup.get_text(separator=' ', strip=True)
+            
+            # Look for property feature patterns (e.g., "3 Beds 2 Baths 1 Parking 600m²")
+            beds_match = re.search(r'(\d+)\s*Beds?', text)
+            baths_match = re.search(r'(\d+)\s*Baths?', text)
+            parking_match = re.search(r'(\d+)\s*Parking', text)
+            size_match = re.search(r'(\d+)\s*m²', text)
+            
+            # Property type detection
+            property_type = "house"
+            text_lower = text.lower()
+            if "apartment" in text_lower or "unit" in text_lower or "flat" in text_lower:
+                property_type = "apartment"
+            elif "townhouse" in text_lower:
+                property_type = "townhouse"
+            elif "land" in text_lower and "vacant" in text_lower:
+                property_type = "land"
+            
+            if beds_match or baths_match:
+                return {
+                    "bedrooms": int(beds_match.group(1)) if beds_match else 0,
+                    "bathrooms": int(baths_match.group(1)) if baths_match else 0,
+                    "parking": int(parking_match.group(1)) if parking_match else 0,
+                    "land_size": int(size_match.group(1)) if size_match else 0,
+                    "property_type": property_type,
+                    "source": "domain.com.au",
+                }
+            
+            return None
+    except Exception as e:
+        logger.error(f"Domain.com.au scrape error: {e}")
+        return None
+
+
+async def _ai_estimate_property(street: str, suburb: str, state: str, postcode: str) -> Optional[dict]:
+    """Use GPT-5.2 via Emergent LLM Key to estimate property details"""
+    if not EMERGENT_LLM_KEY:
+        return None
+    
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        
+        full_addr = f"{street}, {suburb}, {state} {postcode}, Australia"
+        prompt = f"""You are an Australian property data expert. Based on the address below, estimate the most likely property details.
+Address: {full_addr}
+
+Respond ONLY with a valid JSON object (no markdown, no explanation) with these exact keys:
+{{
+  "bedrooms": <number 1-6>,
+  "bathrooms": <number 1-4>,
+  "parking": <number 0-4>,
+  "land_size": <number in square meters, 0 if apartment/unit>,
+  "property_type": "<house|apartment|townhouse|land|villa|duplex>"
+}}
+
+Consider the suburb, postcode, and typical housing stock in that area. Use your knowledge of Australian suburbs to give the most common/median property type for that location."""
+
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"prop_lookup_{uuid.uuid4().hex[:8]}",
+            system_message="You are a concise Australian property data expert. Respond only with JSON."
+        )
+        chat.with_model("openai", "gpt-5.2")
+        
+        user_message = UserMessage(text=prompt)
+        response = await chat.send_message(user_message)
+        
+        # Parse the JSON response
+        import json
+        response_text = response.strip()
+        # Remove markdown code blocks if present
+        if response_text.startswith("```"):
+            response_text = re.sub(r'^```(?:json)?\s*', '', response_text)
+            response_text = re.sub(r'\s*```$', '', response_text)
+        
+        data = json.loads(response_text)
+        return {
+            "bedrooms": int(data.get("bedrooms", 3)),
+            "bathrooms": int(data.get("bathrooms", 1)),
+            "parking": int(data.get("parking", 1)),
+            "land_size": float(data.get("land_size", 0)),
+            "property_type": str(data.get("property_type", "house")),
+            "source": "ai_estimate",
+        }
+    except Exception as e:
+        logger.error(f"AI property estimate error: {e}")
+        return None
+
+
+@api_router.get("/property/lookup")
+async def lookup_property_details(
+    street: str = Query(""),
+    suburb: str = Query(""),
+    state: str = Query(""),
+    postcode: str = Query(""),
+):
+    """Look up property details from domain.com.au or AI estimation"""
+    if not suburb and not street:
+        raise HTTPException(status_code=400, detail="At least suburb or street required")
+    
+    full_address = f"{street}, {suburb} {state} {postcode}".strip(", ")
+    
+    # 1. Try domain.com.au scraping
+    logger.info(f"Looking up property details for: {full_address}")
+    result = await _scrape_domain_for_property(f"{suburb}-{state}-{postcode}")
+    
+    if result:
+        logger.info(f"Found property data from domain.com.au: {result}")
+        return result
+    
+    # 2. Fallback to AI estimation
+    logger.info("Domain.com.au lookup failed, trying AI estimation...")
+    ai_result = await _ai_estimate_property(street, suburb, state, postcode)
+    
+    if ai_result:
+        logger.info(f"AI estimated property data: {ai_result}")
+        return ai_result
+    
+    # 3. Return sensible defaults if all else fails
+    return {
+        "bedrooms": 3,
+        "bathrooms": 1,
+        "parking": 1,
+        "land_size": 0,
+        "property_type": "house",
+        "source": "default",
+    }
+
+
+# ==================== ADDRESS SEARCH ====================
 
 @api_router.get("/address/search")
 async def search_address(q: str = Query(..., min_length=3)):

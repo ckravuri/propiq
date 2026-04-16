@@ -26,10 +26,10 @@ print('User ID: ' + userId);
 
 ## Step 2: Test Backend API
 ```bash
-curl -X GET "https://rental-analytics-9.preview.emergentagent.com/api/auth/me" \
+curl -X GET "https://propiq-test.preview.emergentagent.com/api/auth/me" \
   -H "Authorization: Bearer YOUR_SESSION_TOKEN"
 
-curl -X GET "https://rental-analytics-9.preview.emergentagent.com/api/properties" \
+curl -X GET "https://propiq-test.preview.emergentagent.com/api/properties" \
   -H "Authorization: Bearer YOUR_SESSION_TOKEN"
 ```
 
@@ -44,7 +44,7 @@ await page.context.add_cookies([{
     "secure": True,
     "sameSite": "None"
 }]);
-await page.goto("https://rental-analytics-9.preview.emergentagent.com");
+await page.goto("https://propiq-test.preview.emergentagent.com");
 ```
 
 ## Checklist
