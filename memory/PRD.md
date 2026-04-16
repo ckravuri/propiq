@@ -26,6 +26,9 @@ PropIQ is a cross-platform mobile application that helps users track multiple in
 - [x] Property fields: name, address, suburb, state, postcode, purchase price, loan, interest rate, current value, type, bedrooms, bathrooms, parking, land size, notes
 - [x] Property types: house, unit, townhouse
 - [x] Unlimited properties per user
+- [x] Address autocomplete (via Nominatim/OpenStreetMap)
+- [x] Auto-populate property details (bedrooms, bathrooms, parking, land size, property type) from domain.com.au or AI estimation (GPT-5.2) when address is selected
+- [x] Property image upload (camera + gallery)
 
 #### 3. Income Tracking
 - [x] Add income entries per property

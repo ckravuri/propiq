@@ -777,11 +777,12 @@ Keep it concise and actionable. Format with bullet points."""
 # ==================== PROPERTY LOOKUP (Domain.com.au + AI Fallback) ====================
 
 async def _scrape_domain_for_property(full_address: str) -> Optional[dict]:
-    """Try to find property details on domain.com.au via search"""
+    """Try to find property details on domain.com.au via suburb search"""
     try:
         import urllib.parse
-        encoded = urllib.parse.quote_plus(full_address)
-        url = f"https://www.domain.com.au/sale/{encoded.replace('+', '-').lower()}/"
+        # Clean the address for domain.com.au URL format
+        clean = full_address.lower().strip().replace(' ', '-').replace(',', '')
+        url = f"https://www.domain.com.au/sale/{clean}/"
         
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -789,8 +790,7 @@ async def _scrape_domain_for_property(full_address: str) -> Optional[dict]:
             "Accept-Language": "en-AU,en;q=0.5",
         }
         
-        # Try suburb-based listing search
-        async with httpx.AsyncClient(timeout=10.0) as http_client:
+        async with httpx.AsyncClient(timeout=8.0) as http_client:
             resp = await http_client.get(url, headers=headers, follow_redirects=True)
             
             if resp.status_code != 200:
@@ -799,7 +799,7 @@ async def _scrape_domain_for_property(full_address: str) -> Optional[dict]:
             soup = BeautifulSoup(resp.text, 'html.parser')
             text = soup.get_text(separator=' ', strip=True)
             
-            # Look for property feature patterns (e.g., "3 Beds 2 Baths 1 Parking 600m²")
+            # Look for property feature patterns
             beds_match = re.search(r'(\d+)\s*Beds?', text)
             baths_match = re.search(r'(\d+)\s*Baths?', text)
             parking_match = re.search(r'(\d+)\s*Parking', text)
@@ -827,7 +827,7 @@ async def _scrape_domain_for_property(full_address: str) -> Optional[dict]:
             
             return None
     except Exception as e:
-        logger.error(f"Domain.com.au scrape error: {e}")
+        logger.warning(f"Domain.com.au scrape unavailable: {type(e).__name__}")
         return None
 
 
