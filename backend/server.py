@@ -110,6 +110,7 @@ class ExpenseCreate(BaseModel):
     category: str = "miscellaneous"
     notes: str = ""
     recurring: bool = False
+    frequency: str = "monthly"
     receipt_base64: Optional[str] = None
 
 class ExpenseOut(BaseModel):
@@ -121,6 +122,7 @@ class ExpenseOut(BaseModel):
     category: str = "miscellaneous"
     notes: str = ""
     recurring: bool = False
+    frequency: str = "monthly"
     receipt_base64: Optional[str] = None
     created_date: str = ""
 
@@ -428,10 +430,31 @@ async def get_dashboard(request: Request):
             return amt * 26
         elif freq == "monthly":
             return amt * 12
+        elif freq == "quarterly":
+            return amt * 4
+        elif freq == "yearly":
+            return amt
         return amt  # one-off
     
+    def annualize_expense(entry):
+        amt = entry.get("amount", 0)
+        if not entry.get("recurring", False):
+            return amt  # one-off expense, use as-is
+        freq = entry.get("frequency", "monthly")
+        if freq == "weekly":
+            return amt * 52
+        elif freq == "fortnightly":
+            return amt * 26
+        elif freq == "monthly":
+            return amt * 12
+        elif freq == "quarterly":
+            return amt * 4
+        elif freq == "yearly":
+            return amt
+        return amt
+    
     total_yearly_income = sum(annualize(i) for i in ytd_income)
-    total_yearly_expenses = sum(e.get("amount", 0) for e in ytd_expenses)
+    total_yearly_expenses = sum(annualize_expense(e) for e in ytd_expenses)
     net_cashflow = total_yearly_income - total_yearly_expenses
     monthly_avg_income = total_yearly_income / max(now.month, 1)
     yearly_roi = (net_cashflow / total_purchase_value * 100) if total_purchase_value > 0 else 0
@@ -443,8 +466,8 @@ async def get_dashboard(request: Request):
         p_income = [i for i in ytd_income if i["property_id"] == pid]
         p_expenses = [e for e in ytd_expenses if e["property_id"] == pid]
         p_income_total = sum(annualize(i) for i in p_income)
-        p_expense_total = sum(e.get("amount", 0) for e in p_expenses)
-        p_repairs = sum(e.get("amount", 0) for e in p_expenses if e.get("category") in ["repairs", "repeated repairs", "maintenance"])
+        p_expense_total = sum(annualize_expense(e) for e in p_expenses)
+        p_repairs = sum(annualize_expense(e) for e in p_expenses if e.get("category") in ["repairs", "repeated repairs", "maintenance"])
         p_net = p_income_total - p_expense_total
         purchase = p.get("purchase_price", 0)
         current = p.get("current_estimated_value", 0)

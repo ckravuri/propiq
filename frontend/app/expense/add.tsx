@@ -20,6 +20,7 @@ export default function AddExpenseScreen() {
     category: 'miscellaneous',
     notes: '',
     recurring: false,
+    frequency: 'monthly',
   });
 
   const update = (key: string, val: any) => setForm(prev => ({ ...prev, [key]: val }));
@@ -70,6 +71,7 @@ export default function AddExpenseScreen() {
         category: form.category,
         notes: form.notes.trim(),
         recurring: form.recurring,
+        frequency: form.frequency,
         receipt_base64: receiptBase64,
       });
       router.back();
@@ -139,6 +141,37 @@ export default function AddExpenseScreen() {
             <Switch testID="recurring-toggle" value={form.recurring} onValueChange={(v) => update('recurring', v)}
               trackColor={{ false: colors.border, true: colors.danger }} thumbColor="#FFF" />
           </View>
+
+          {/* Frequency selector - shown when recurring */}
+          {form.recurring && (
+            <View style={styles.field}>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Frequency</Text>
+              <View style={styles.freqRow}>
+                {(['weekly', 'monthly', 'quarterly', 'yearly'] as const).map(f => (
+                  <TouchableOpacity key={f} testID={`expense-freq-${f}`}
+                    style={[styles.freqChip, { borderColor: colors.border },
+                      form.frequency === f && { backgroundColor: colors.danger, borderColor: colors.danger }]}
+                    onPress={() => update('frequency', f)}>
+                    <Text style={[styles.freqText, { color: colors.textPrimary },
+                      form.frequency === f && { color: '#FFF' }]}>{f}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {parseFloat(form.amount) > 0 && (
+                <View testID="yearly-expense-estimate" style={[styles.yearlyEstimate, { backgroundColor: colors.danger + '10', borderColor: colors.danger + '30' }]}>
+                  <Ionicons name="calculator" size={16} color={colors.danger} />
+                  <Text style={[styles.yearlyText, { color: colors.danger }]}>
+                    Annualised: ${(
+                      form.frequency === 'weekly' ? parseFloat(form.amount) * 52 :
+                      form.frequency === 'monthly' ? parseFloat(form.amount) * 12 :
+                      form.frequency === 'quarterly' ? parseFloat(form.amount) * 4 :
+                      parseFloat(form.amount)
+                    ).toLocaleString()}/yr
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
 
           {/* Receipt/Invoice Attachment */}
           <View style={styles.field}>
@@ -212,6 +245,11 @@ const styles = StyleSheet.create({
   recurringRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, borderTopWidth: 1, borderBottomWidth: 1, marginBottom: 16 },
   recurringLabel: { fontSize: 15, fontWeight: '500' },
   recurringDesc: { fontSize: 12, marginTop: 2 },
+  freqRow: { flexDirection: 'row', gap: 6 },
+  freqChip: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, borderWidth: 1 },
+  freqText: { fontSize: 12, fontWeight: '600', textTransform: 'capitalize' },
+  yearlyEstimate: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, borderWidth: 1 },
+  yearlyText: { fontSize: 14, fontWeight: '600' },
   receiptSection: { borderRadius: 16, borderWidth: 1, overflow: 'hidden' },
   receiptPreview: { width: '100%', height: 180, borderRadius: 14 },
   receiptPlaceholder: { alignItems: 'center', paddingVertical: 24, gap: 6 },

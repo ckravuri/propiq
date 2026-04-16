@@ -282,6 +282,16 @@ export default function PropertyDetailScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.entryDate, { color: colors.textSecondary }]}>{e.date}</Text>
                     <Text style={[styles.entryType, { color: colors.textPrimary }]}>{e.category}{e.recurring ? ' (Recurring)' : ''}</Text>
+                    {e.recurring && (e as any).frequency && (
+                      <Text style={[styles.entryNotes, { color: colors.accent }]}>
+                        {(e as any).frequency} → ${(
+                          (e as any).frequency === 'weekly' ? e.amount * 52 :
+                          (e as any).frequency === 'monthly' ? e.amount * 12 :
+                          (e as any).frequency === 'quarterly' ? e.amount * 4 :
+                          e.amount
+                        ).toLocaleString()}/yr
+                      </Text>
+                    )}
                     {e.notes ? <Text style={[styles.entryNotes, { color: colors.textSecondary }]}>{e.notes}</Text> : null}
                   </View>
                   <View style={styles.entryRight}>
