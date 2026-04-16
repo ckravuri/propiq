@@ -9,7 +9,7 @@ import { useTheme } from '../../lib/theme';
 import { apiGet } from '../../lib/api';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import type { Property } from '../../lib/types';
 
 const CHART_W = Dimensions.get('window').width - 56;
