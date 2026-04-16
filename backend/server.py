@@ -585,6 +585,99 @@ async def get_report_summary(property_id: str, request: Request, year: int = Que
         "expense_entries": expenses
     }
 
+# ==================== MULTI-YEAR COMPARISON ====================
+
+@api_router.get("/reports/comparison/{property_id}")
+async def get_year_comparison(property_id: str, request: Request):
+    user = await get_current_user(request)
+    prop = await db.properties.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    
+    now = datetime.now(timezone.utc)
+    current_year = now.year
+    years_data = []
+    
+    for y in range(current_year - 4, current_year + 1):
+        ys = f"{y}-01-01"
+        ye = f"{y}-12-31"
+        inc = await db.income_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": ys, "$lte": ye}}, {"_id": 0}).to_list(10000)
+        exp = await db.expense_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": ys, "$lte": ye}}, {"_id": 0}).to_list(10000)
+        total_inc = sum(i.get("amount", 0) for i in inc)
+        total_exp = sum(e.get("amount", 0) for e in exp)
+        repairs = sum(e.get("amount", 0) for e in exp if e.get("category") in ["repairs", "repeated repairs", "maintenance"])
+        exp_cats = {}
+        for e in exp:
+            cat = e.get("category", "miscellaneous")
+            exp_cats[cat] = exp_cats.get(cat, 0) + e.get("amount", 0)
+        years_data.append({
+            "year": y,
+            "income": total_inc,
+            "expenses": total_exp,
+            "net_cashflow": total_inc - total_exp,
+            "repairs": repairs,
+            "expense_categories": exp_cats,
+            "entry_count": len(inc) + len(exp)
+        })
+    
+    return {
+        "property_id": property_id,
+        "property_name": prop.get("property_name", ""),
+        "purchase_price": prop.get("purchase_price", 0),
+        "current_value": prop.get("current_estimated_value", 0),
+        "years": years_data
+    }
+
+# ==================== PORTFOLIO HISTORY ====================
+
+@api_router.get("/portfolio/history")
+async def get_portfolio_history(request: Request):
+    user = await get_current_user(request)
+    snapshots = await db.portfolio_snapshots.find({"user_id": user["user_id"]}, {"_id": 0}).sort("date", 1).to_list(1000)
+    return snapshots
+
+@api_router.post("/portfolio/snapshot")
+async def create_portfolio_snapshot(request: Request):
+    user = await get_current_user(request)
+    user_id = user["user_id"]
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    existing = await db.portfolio_snapshots.find_one({"user_id": user_id, "date": today})
+    
+    properties = await db.properties.find({"user_id": user_id}, {"_id": 0}).to_list(1000)
+    total_market = sum(p.get("current_estimated_value", 0) for p in properties)
+    total_purchase = sum(p.get("purchase_price", 0) for p in properties)
+    total_equity = total_market - sum(p.get("loan_amount", 0) for p in properties)
+    total_loans = sum(p.get("loan_amount", 0) for p in properties)
+    
+    now = datetime.now(timezone.utc)
+    year_start = f"{now.year}-01-01"
+    all_income = await db.income_entries.find({"user_id": user_id, "date": {"$gte": year_start}}, {"_id": 0}).to_list(10000)
+    all_expenses = await db.expense_entries.find({"user_id": user_id, "date": {"$gte": year_start}}, {"_id": 0}).to_list(10000)
+    ytd_income = sum(i.get("amount", 0) for i in all_income)
+    ytd_expenses = sum(e.get("amount", 0) for e in all_expenses)
+    
+    snapshot = {
+        "user_id": user_id,
+        "date": today,
+        "total_properties": len(properties),
+        "total_market_value": total_market,
+        "total_purchase_value": total_purchase,
+        "total_equity": total_equity,
+        "total_loans": total_loans,
+        "ytd_income": ytd_income,
+        "ytd_expenses": ytd_expenses,
+        "net_cashflow": ytd_income - ytd_expenses,
+    }
+    
+    if existing:
+        await db.portfolio_snapshots.update_one({"user_id": user_id, "date": today}, {"$set": snapshot})
+    else:
+        snapshot["snapshot_id"] = f"snap_{uuid.uuid4().hex[:12]}"
+        await db.portfolio_snapshots.insert_one(snapshot)
+    
+    return {"message": "Snapshot saved", "date": today}
+
 # ==================== AI INSIGHTS ====================
 
 @api_router.post("/ai/insights")

@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { PieChart, BarChart, LineChart } from 'react-native-chart-kit';
 import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
-import { apiGet } from '../../lib/api';
+import { apiGet, apiPost } from '../../lib/api';
 import AdBanner from '../../components/AdBanner';
 import type { DashboardData } from '../../lib/types';
 
@@ -26,11 +26,18 @@ export default function DashboardScreen() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [portfolioHistory, setPortfolioHistory] = useState<any[]>([]);
 
   const fetchData = useCallback(async () => {
     try {
-      const d = await apiGet('/dashboard');
+      const [d, history] = await Promise.all([
+        apiGet('/dashboard'),
+        apiGet('/portfolio/history'),
+      ]);
       setData(d);
+      setPortfolioHistory(history || []);
+      // Auto-snapshot
+      try { await apiPost('/portfolio/snapshot'); } catch {}
     } catch (e) {
       console.error('Dashboard fetch error:', e);
     } finally {
@@ -159,6 +166,47 @@ export default function DashboardScreen() {
                 </View>
               </TouchableOpacity>
             ))}
+          </View>
+        )}
+
+        {/* Portfolio Growth Chart */}
+        {portfolioHistory.length > 2 && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Portfolio Growth</Text>
+            <View style={[styles.chartCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <LineChart
+                data={{
+                  labels: portfolioHistory.filter((_, i) => i % Math.max(1, Math.floor(portfolioHistory.length / 6)) === 0).map(s => s.date?.substring(5) || ''),
+                  datasets: [{
+                    data: portfolioHistory.map(s => s.total_market_value || 0),
+                    color: (o = 1) => `rgba(28, 63, 53, ${o})`,
+                    strokeWidth: 2,
+                  }, {
+                    data: portfolioHistory.map(s => s.total_equity || 0),
+                    color: (o = 1) => `rgba(211, 107, 79, ${o})`,
+                    strokeWidth: 2,
+                  }],
+                }}
+                width={CHART_WIDTH}
+                height={220}
+                chartConfig={{ ...chartConfig, color: (o = 1) => `rgba(28, 63, 53, ${o})` }}
+                style={styles.chart}
+                bezier
+                yAxisLabel="$"
+                yAxisSuffix=""
+                formatYLabel={(v) => { const n = parseInt(v); return n >= 1000000 ? `${(n/1000000).toFixed(1)}M` : n >= 1000 ? `${(n/1000).toFixed(0)}K` : v; }}
+              />
+              <View style={styles.legendRow}>
+                <View style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: '#1C3F35' }]} />
+                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>Market Value</Text>
+                </View>
+                <View style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: '#D36B4F' }]} />
+                  <Text style={[styles.legendText, { color: colors.textSecondary }]}>Equity</Text>
+                </View>
+              </View>
+            </View>
           </View>
         )}
 

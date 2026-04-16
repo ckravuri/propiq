@@ -1,8 +1,9 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { BarChart } from 'react-native-chart-kit';
 import { useTheme } from '../../lib/theme';
 import { apiGet } from '../../lib/api';
 import * as Print from 'expo-print';
@@ -10,15 +11,48 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import type { Property } from '../../lib/types';
 
+const CHART_W = Dimensions.get('window').width - 56;
+
+interface YearData {
+  year: number;
+  income: number;
+  expenses: number;
+  net_cashflow: number;
+  repairs: number;
+  entry_count: number;
+}
+
+interface Comparison {
+  property_id: string;
+  property_name: string;
+  purchase_price: number;
+  current_value: number;
+  years: YearData[];
+}
+
 export default function ReportsScreen() {
   const { colors } = useTheme();
   const [properties, setProperties] = useState<Property[]>([]);
+  const [comparisons, setComparisons] = useState<Comparison[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'export' | 'compare'>('export');
   const currentYear = new Date().getFullYear();
 
   useFocusEffect(useCallback(() => {
-    apiGet('/properties').then(setProperties).catch(console.error).finally(() => setLoading(false));
+    const load = async () => {
+      try {
+        const props = await apiGet('/properties');
+        setProperties(props);
+        const comps = await Promise.all(props.map((p: Property) => apiGet(`/reports/comparison/${p.property_id}`)));
+        setComparisons(comps);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
   }, []));
 
   const generatePDF = async (propertyId: string, propertyName: string) => {
@@ -131,6 +165,19 @@ export default function ReportsScreen() {
         <Text style={[styles.year, { color: colors.textSecondary }]}>Year {currentYear}</Text>
       </View>
 
+      {/* Tab Switcher */}
+      <View style={[styles.tabBar, { borderBottomColor: colors.border }]}>
+        {(['export', 'compare'] as const).map(tab => (
+          <TouchableOpacity key={tab} testID={`reports-tab-${tab}`}
+            style={[styles.tab, activeTab === tab && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
+            onPress={() => setActiveTab(tab)}>
+            <Text style={[styles.tabText, { color: activeTab === tab ? colors.primary : colors.textSecondary }]}>
+              {tab === 'export' ? 'Export Reports' : 'Year Comparison'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {properties.length === 0 ? (
           <View style={styles.emptyState}>
@@ -139,7 +186,8 @@ export default function ReportsScreen() {
             <Text style={[styles.emptyDesc, { color: colors.textSecondary }]}>Add properties to generate reports</Text>
           </View>
         ) : (
-          properties.map(p => (
+          <>
+          {activeTab === 'export' && properties.map(p => (
             <View key={p.property_id} style={[styles.reportCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.reportHeader}>
                 <View>
@@ -181,7 +229,71 @@ export default function ReportsScreen() {
                 </TouchableOpacity>
               </View>
             </View>
-          ))
+          ))}
+
+          {activeTab === 'compare' && comparisons.map(comp => {
+            const activeYears = comp.years.filter(y => y.entry_count > 0 || y.year === currentYear);
+            const chartYears = activeYears.length > 0 ? activeYears : comp.years.slice(-3);
+            const chartConfig = {
+              backgroundGradientFrom: colors.card,
+              backgroundGradientTo: colors.card,
+              decimalPlaces: 0,
+              color: (opacity = 1) => `rgba(28, 63, 53, ${opacity})`,
+              labelColor: () => colors.textSecondary,
+              propsForLabels: { fontSize: 10 },
+              propsForBackgroundLines: { stroke: colors.border },
+            };
+
+            return (
+              <View key={comp.property_id} testID={`comparison-${comp.property_id}`}
+                style={[styles.compCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Text style={[styles.compTitle, { color: colors.textPrimary }]}>{comp.property_name}</Text>
+                <Text style={[styles.compSubtitle, { color: colors.textSecondary }]}>
+                  Purchase: ${comp.purchase_price.toLocaleString()} | Current: ${comp.current_value.toLocaleString()}
+                </Text>
+
+                {/* Yearly Cashflow Bar Chart */}
+                <Text style={[styles.compChartLabel, { color: colors.textSecondary }]}>Net Cashflow by Year</Text>
+                <BarChart
+                  data={{
+                    labels: chartYears.map(y => String(y.year)),
+                    datasets: [{ data: chartYears.map(y => Math.max(y.net_cashflow, 0.01)) }],
+                  }}
+                  width={CHART_W}
+                  height={180}
+                  chartConfig={chartConfig}
+                  style={{ borderRadius: 12, marginLeft: -8 }}
+                  showBarTops={false}
+                  fromZero
+                  yAxisLabel="$"
+                  yAxisSuffix=""
+                />
+
+                {/* Year-by-Year Table */}
+                <View style={[styles.compTable, { borderColor: colors.border }]}>
+                  <View style={[styles.compRow, styles.compRowHeader, { backgroundColor: colors.primary }]}>
+                    <Text style={[styles.compCell, styles.compCellHead]}>Year</Text>
+                    <Text style={[styles.compCell, styles.compCellHead]}>Income</Text>
+                    <Text style={[styles.compCell, styles.compCellHead]}>Expenses</Text>
+                    <Text style={[styles.compCell, styles.compCellHead]}>Net</Text>
+                    <Text style={[styles.compCell, styles.compCellHead]}>Repairs</Text>
+                  </View>
+                  {chartYears.map(y => (
+                    <View key={y.year} style={[styles.compRow, { borderBottomColor: colors.border }]}>
+                      <Text style={[styles.compCell, { color: colors.textPrimary, fontWeight: '600' }]}>{y.year}</Text>
+                      <Text style={[styles.compCell, { color: colors.success }]}>${y.income.toLocaleString()}</Text>
+                      <Text style={[styles.compCell, { color: colors.danger }]}>${y.expenses.toLocaleString()}</Text>
+                      <Text style={[styles.compCell, { color: y.net_cashflow >= 0 ? colors.success : colors.danger, fontWeight: '700' }]}>
+                        ${y.net_cashflow.toLocaleString()}
+                      </Text>
+                      <Text style={[styles.compCell, { color: colors.textSecondary }]}>${y.repairs.toLocaleString()}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            );
+          })}
+          </>
         )}
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -194,6 +306,9 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1 },
   title: { fontSize: 24, fontWeight: '700' },
   year: { fontSize: 14, fontWeight: '600' },
+  tabBar: { flexDirection: 'row', borderBottomWidth: 1, paddingHorizontal: 20 },
+  tab: { flex: 1, paddingVertical: 12, alignItems: 'center' },
+  tabText: { fontSize: 14, fontWeight: '600' },
   scroll: { padding: 20, gap: 12 },
   reportCard: { borderRadius: 16, padding: 16, borderWidth: 1 },
   reportHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
@@ -204,6 +319,15 @@ const styles = StyleSheet.create({
   reportActions: { flexDirection: 'row', gap: 10 },
   actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 12 },
   actionText: { color: '#FFF', fontSize: 14, fontWeight: '600' },
+  compCard: { borderRadius: 16, padding: 16, borderWidth: 1 },
+  compTitle: { fontSize: 18, fontWeight: '700', marginBottom: 2 },
+  compSubtitle: { fontSize: 13, marginBottom: 16 },
+  compChartLabel: { fontSize: 12, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 8, marginTop: 8 },
+  compTable: { borderWidth: 1, borderRadius: 10, overflow: 'hidden', marginTop: 12 },
+  compRow: { flexDirection: 'row', borderBottomWidth: 0.5 },
+  compRowHeader: { borderBottomWidth: 0 },
+  compCell: { flex: 1, paddingVertical: 8, paddingHorizontal: 6, fontSize: 12, textAlign: 'center' },
+  compCellHead: { color: '#FFF', fontWeight: '600', fontSize: 11 },
   emptyState: { alignItems: 'center', marginTop: 80 },
   emptyTitle: { fontSize: 20, fontWeight: '700', marginTop: 16 },
   emptyDesc: { fontSize: 14, marginTop: 6 },
