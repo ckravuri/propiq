@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { BarChart } from 'react-native-chart-kit';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../lib/theme';
 import { apiGet } from '../../lib/api';
 import * as Print from 'expo-print';
@@ -212,7 +213,7 @@ export default function ReportsScreen() {
         URL.revokeObjectURL(url);
       } else {
         // Mobile: download the CSV file directly from the server
-        const token = await require('@react-native-async-storage/async-storage').default.getItem('session_token');
+        const token = await AsyncStorage.getItem('session_token');
         const baseUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
         const downloadUrl = `${baseUrl}/api/reports/csv-download/${propertyId}?year=${currentYear}`;
         
