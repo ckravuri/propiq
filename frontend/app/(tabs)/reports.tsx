@@ -212,29 +212,15 @@ export default function ReportsScreen() {
         a.click();
         URL.revokeObjectURL(url);
       } else {
-        // Mobile: download the CSV file directly from the server
-        const token = await AsyncStorage.getItem('session_token');
-        const baseUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
-        const downloadUrl = `${baseUrl}/api/reports/csv-download/${propertyId}?year=${currentYear}`;
-        
-        const safeName = propertyName.replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_');
-        const filename = `PropIQ_${safeName}_${currentYear}.csv`;
-        const fileUri = FileSystem.documentDirectory + filename;
-        
-        const downloadResult = await FileSystem.downloadAsync(
-          downloadUrl,
-          fileUri,
-          {
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
-          }
-        );
-        
-        if (downloadResult.status !== 200) {
-          throw new Error(`Download failed with status ${downloadResult.status}`);
-        }
+        // Mobile: get CSV data via authenticated API, then save to file and share
+        const data = await apiGet(`/reports/csv/${propertyId}?year=${currentYear}`);
+        const fileUri = FileSystem.documentDirectory + data.filename;
+        await FileSystem.writeAsStringAsync(fileUri, data.content_base64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
         
         if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(downloadResult.uri, {
+          await Sharing.shareAsync(fileUri, {
             mimeType: 'text/csv',
             dialogTitle: `Export ${propertyName} Report`,
             UTI: 'public.comma-separated-values-text',
