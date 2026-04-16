@@ -736,6 +736,37 @@ Keep it concise and actionable. Format with bullet points."""
 
 # ==================== HEALTH CHECK ====================
 
+@api_router.get("/address/search")
+async def search_address(q: str = Query(..., min_length=3)):
+    """Proxy to Nominatim for Australian address autocomplete"""
+    try:
+        async with httpx.AsyncClient() as http_client:
+            resp = await http_client.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": q, "format": "json", "addressdetails": 1, "countrycodes": "au", "limit": 5},
+                headers={"User-Agent": "PropIQ/1.0"},
+                timeout=5.0,
+            )
+        if resp.status_code != 200:
+            return []
+        results = resp.json()
+        suggestions = []
+        for r in results:
+            addr = r.get("address", {})
+            suggestions.append({
+                "display": r.get("display_name", ""),
+                "street": f"{addr.get('house_number', '')} {addr.get('road', '')}".strip(),
+                "suburb": addr.get("suburb", addr.get("town", addr.get("city", ""))),
+                "state": addr.get("state", ""),
+                "postcode": addr.get("postcode", ""),
+                "lat": r.get("lat"),
+                "lon": r.get("lon"),
+            })
+        return suggestions
+    except Exception as e:
+        logger.error(f"Address search error: {e}")
+        return []
+
 @api_router.get("/")
 async def root():
     return {"message": "PropIQ API", "status": "running"}
