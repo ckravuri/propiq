@@ -987,34 +987,103 @@ async def lookup_property_details(
 
 @api_router.get("/address/search")
 async def search_address(q: str = Query(..., min_length=3)):
-    """Proxy to Nominatim for Australian address autocomplete"""
+    """Australian address autocomplete using multiple sources for accuracy"""
+    results = []
+    
+    # Source 1: Photon (Komoot) - better autocomplete behavior
     try:
         async with httpx.AsyncClient() as http_client:
             resp = await http_client.get(
-                "https://nominatim.openstreetmap.org/search",
-                params={"q": q, "format": "json", "addressdetails": 1, "countrycodes": "au", "limit": 5},
+                "https://photon.komoot.io/api/",
+                params={
+                    "q": q,
+                    "limit": 6,
+                    "lang": "en",
+                    "lat": -25.2744,  # Australia center bias
+                    "lon": 133.7751,
+                },
                 headers={"User-Agent": "PropIQ/1.0"},
-                timeout=5.0,
+                timeout=4.0,
             )
-        if resp.status_code != 200:
-            return []
-        results = resp.json()
-        suggestions = []
-        for r in results:
-            addr = r.get("address", {})
-            suggestions.append({
-                "display": r.get("display_name", ""),
-                "street": f"{addr.get('house_number', '')} {addr.get('road', '')}".strip(),
-                "suburb": addr.get("suburb", addr.get("town", addr.get("city", ""))),
-                "state": addr.get("state", ""),
-                "postcode": addr.get("postcode", ""),
-                "lat": r.get("lat"),
-                "lon": r.get("lon"),
-            })
-        return suggestions
+        if resp.status_code == 200:
+            data = resp.json()
+            for f in data.get("features", []):
+                props = f.get("properties", {})
+                country = props.get("country", "")
+                if country and "Australia" not in country:
+                    continue  # Skip non-Australian results
+                
+                house_number = props.get("housenumber", "")
+                street_name = props.get("street", props.get("name", ""))
+                suburb = props.get("city", props.get("locality", props.get("district", "")))
+                state = props.get("state", "")
+                postcode = props.get("postcode", "")
+                
+                street_full = f"{house_number} {street_name}".strip()
+                
+                # Build clean display
+                parts = [p for p in [street_full, suburb, state, postcode] if p]
+                display = ", ".join(parts)
+                
+                if display and display not in [r.get("display") for r in results]:
+                    results.append({
+                        "display": display,
+                        "street": street_full,
+                        "suburb": suburb,
+                        "state": state,
+                        "postcode": postcode,
+                        "lat": str(f.get("geometry", {}).get("coordinates", [0, 0])[1]),
+                        "lon": str(f.get("geometry", {}).get("coordinates", [0, 0])[0]),
+                    })
     except Exception as e:
-        logger.error(f"Address search error: {e}")
-        return []
+        logger.warning(f"Photon search error: {type(e).__name__}")
+    
+    # Source 2: Nominatim (OpenStreetMap) - more structured results
+    if len(results) < 4:
+        try:
+            async with httpx.AsyncClient() as http_client:
+                resp = await http_client.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params={
+                        "q": q,
+                        "format": "json",
+                        "addressdetails": 1,
+                        "countrycodes": "au",
+                        "limit": 5,
+                        "dedupe": 1,
+                    },
+                    headers={"User-Agent": "PropIQ/1.0"},
+                    timeout=4.0,
+                )
+            if resp.status_code == 200:
+                for r in resp.json():
+                    addr = r.get("address", {})
+                    house_number = addr.get("house_number", "")
+                    road = addr.get("road", "")
+                    street_full = f"{house_number} {road}".strip()
+                    suburb = addr.get("suburb", addr.get("town", addr.get("city", addr.get("village", ""))))
+                    state = addr.get("state", "")
+                    postcode = addr.get("postcode", "")
+                    
+                    parts = [p for p in [street_full, suburb, state, postcode] if p]
+                    display = ", ".join(parts)
+                    
+                    # Avoid duplicates
+                    if display and display not in [r.get("display") for r in results]:
+                        results.append({
+                            "display": display,
+                            "street": street_full,
+                            "suburb": suburb,
+                            "state": state,
+                            "postcode": postcode,
+                            "lat": r.get("lat"),
+                            "lon": r.get("lon"),
+                        })
+        except Exception as e:
+            logger.warning(f"Nominatim search error: {type(e).__name__}")
+    
+    # Return top 6 unique results
+    return results[:6]
 
 @api_router.get("/")
 async def root():
