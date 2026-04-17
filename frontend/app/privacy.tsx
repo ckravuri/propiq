@@ -28,7 +28,7 @@ export default function PrivacyPolicyScreen() {
         <Text style={[styles.lastUpdated, { color: colors.textSecondary }]}>Last Updated: April 2026</Text>
 
         <Section title="1. Introduction">
-PropIQ ("we", "our", "us") is committed to protecting the privacy and security of your personal information. This Privacy Policy explains how we collect, use, store, and protect your data when you use the PropIQ mobile application ("App"). By using PropIQ, you consent to the practices described in this policy.</Section>
+PropIQ Track ("we", "our", "us") is committed to protecting the privacy and security of your personal information. This Privacy Policy explains how we collect, use, store, and protect your data when you use the PropIQ Track mobile application ("App"). By using PropIQ Track, you consent to the practices described in this policy.</Section>
 
         <Section title="2. Information We Collect">
 Account Information: When you sign in via Google, we receive your name and email address.{"\n\n"}Property Data: Property addresses, purchase prices, valuations, specifications (bedrooms, bathrooms, land size), and photos you upload.{"\n\n"}Financial Data: Income entries, expense records, receipt images, and bill reminders you create within the App.{"\n\n"}Usage Data: App interaction logs, device type, operating system version, and crash reports for improving the App.{"\n\n"}We do NOT collect: passwords (Google handles authentication), location data, contacts, or any data from other apps on your device.</Section>

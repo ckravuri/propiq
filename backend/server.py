@@ -588,7 +588,7 @@ async def generate_csv_report(property_id: str, request: Request, year: int = Qu
     csv_b64 = base64.b64encode(csv_content.encode('utf-8')).decode('ascii')
     # Sanitize filename - remove special chars
     safe_name = re.sub(r'[^\w\s-]', '', prop.get('property_name', 'report')).strip().replace(' ', '_')
-    return {"filename": f"PropIQ_{safe_name}_{year}.csv", "content_base64": csv_b64, "content_type": "text/csv"}
+    return {"filename": f"PropIQ_Track_{safe_name}_{year}.csv", "content_base64": csv_b64, "content_type": "text/csv"}
 
 
 @api_router.get("/reports/csv-download/{property_id}")
@@ -636,7 +636,7 @@ async def download_csv_report(property_id: str, request: Request, year: int = Qu
     
     csv_content = output.getvalue()
     safe_name = re.sub(r'[^\w\s-]', '', prop.get('property_name', 'report')).strip().replace(' ', '_')
-    filename = f"PropIQ_{safe_name}_{year}.csv"
+    filename = f"PropIQ_Track_{safe_name}_{year}.csv"
     
     from starlette.responses import StreamingResponse
     return StreamingResponse(
@@ -1159,7 +1159,7 @@ async def search_address(q: str = Query(..., min_length=3)):
 
 @api_router.get("/")
 async def root():
-    return {"message": "PropIQ API", "status": "running"}
+    return {"message": "PropIQ Track API", "status": "running"}
 
 @api_router.get("/health")
 async def health():
@@ -1172,8 +1172,8 @@ async def privacy_policy_web():
     """Web-accessible privacy policy page (required for App Store / Play Store)"""
     return HTMLResponse(content="""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>PropIQ - Privacy Policy</title>
 <style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:800px;margin:0 auto;padding:20px 24px;color:#1C1917;line-height:1.7}h1{color:#1C3F35;border-bottom:2px solid #1C3F35;padding-bottom:10px}h2{color:#1C3F35;margin-top:28px}p,ul{font-size:15px;color:#44403C}.updated{color:#78716C;font-style:italic;font-size:13px}</style></head><body>
-<h1>PropIQ Privacy Policy</h1><p class="updated">Last Updated: April 2026</p>
-<h2>1. Introduction</h2><p>PropIQ ("we", "our", "us") is committed to protecting the privacy and security of your personal information. This Privacy Policy explains how we collect, use, store, and protect your data when you use the PropIQ mobile application ("App").</p>
+<h1>PropIQ Track Privacy Policy</h1><p class="updated">Last Updated: April 2026</p>
+<h2>1. Introduction</h2><p>PropIQ Track ("we", "our", "us") is committed to protecting the privacy and security of your personal information. This Privacy Policy explains how we collect, use, store, and protect your data when you use the PropIQ Track mobile application ("App").</p>
 <h2>2. Information We Collect</h2><ul><li><b>Account Information:</b> Name and email via Google Sign-In</li><li><b>Property Data:</b> Addresses, prices, valuations, specifications, photos</li><li><b>Financial Data:</b> Income, expenses, receipts, bill reminders</li><li><b>Usage Data:</b> App interaction logs, device type, crash reports</li></ul><p>We do NOT collect passwords, location data, contacts, or data from other apps.</p>
 <h2>3. How We Use Your Data</h2><p>Your data is used solely to provide property tracking, financial calculations, reporting, and bill reminders. We do NOT sell or share your data with third parties for marketing.</p>
 <h2>4. Data Storage & Security</h2><p>All data is encrypted in transit (TLS/SSL) and at rest (AES-256). We use session-based authentication, access controls, and regular security audits.</p>
@@ -1191,7 +1191,7 @@ async def security_policy_web():
     """Web-accessible security policy page"""
     return HTMLResponse(content="""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>PropIQ - Security Policy</title>
 <style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:800px;margin:0 auto;padding:20px 24px;color:#1C1917;line-height:1.7}h1{color:#1C3F35;border-bottom:2px solid #1C3F35;padding-bottom:10px}h2{color:#1C3F35;margin-top:28px}p,ul{font-size:15px;color:#44403C}.updated{color:#78716C;font-style:italic;font-size:13px}</style></head><body>
-<h1>PropIQ Security Policy</h1><p class="updated">Last Updated: April 2026</p>
+<h1>PropIQ Track Security Policy</h1><p class="updated">Last Updated: April 2026</p>
 <h2>1. Overview</h2><p>PropIQ implements industry-standard cybersecurity measures to ensure confidentiality, integrity, and availability of all user data.</p>
 <h2>2. Authentication</h2><ul><li>OAuth 2.0 via Google Sign-In</li><li>Session tokens with 24-hour expiration</li><li>No passwords stored</li><li>Server-side validation on every request</li></ul>
 <h2>3. Encryption</h2><ul><li>TLS 1.2+ for all data in transit</li><li>AES-256 for data at rest</li><li>HTTPS enforced on all endpoints</li></ul>

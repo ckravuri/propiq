@@ -130,7 +130,7 @@ export default function ReportsScreen() {
         <!-- Page Header with Logo -->
         <div class="page-header">
           ${logoSvg}
-          <span class="brand-name">PropIQ</span>
+          <span class="brand-name">PropIQ Track</span>
           <span class="brand-tagline">Smart Property Investment Tracking</span>
         </div>
 
@@ -178,7 +178,7 @@ export default function ReportsScreen() {
 
         <!-- Footer -->
         <div class="page-footer">
-          PropIQ — Smart Property Investment Tracking &nbsp;|&nbsp; Report generated on ${new Date().toLocaleDateString('en-AU')} &nbsp;|&nbsp; Page content is for informational purposes only
+          PropIQ Track — Smart Property Investment Tracking &nbsp;|&nbsp; Report generated on ${new Date().toLocaleDateString('en-AU')} &nbsp;|&nbsp; Page content is for informational purposes only
         </div>
         </body></html>`;
 

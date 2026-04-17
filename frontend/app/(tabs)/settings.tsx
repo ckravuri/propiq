@@ -62,7 +62,7 @@ export default function SettingsScreen() {
           <SettingRow icon="shield-checkmark" label="Privacy Policy" value="Data protection & rights" onPress={() => router.push('/privacy')} />
           <SettingRow icon="lock-closed" label="Security Policy" value="Cybersecurity standards" onPress={() => router.push('/security')} />
           <SettingRow icon="help-circle" label="Help & Support" />
-          <SettingRow icon="information-circle" label="About PropIQ" value="Version 1.0.0" />
+          <SettingRow icon="information-circle" label="About PropIQ Track" value="Version 1.0.0" />
         </View>
 
         {/* Account */}

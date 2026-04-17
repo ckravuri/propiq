@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "PropIQ",
-    "slug": "propiq",
+    "name": "PropIQ Track",
+    "slug": "propiq-track",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/app-icon-1024.png",
