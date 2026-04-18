@@ -80,7 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const redirectUrl = window.location.origin + '/';
       window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
     } else {
-      const redirectUrl = Linking.createURL('auth-callback');
+      const redirectUrl = Linking.createURL('/');
       console.log('Auth redirect URL:', redirectUrl);
       const result = await WebBrowser.openAuthSessionAsync(
         `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`,
