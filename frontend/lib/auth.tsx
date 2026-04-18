@@ -80,20 +80,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const redirectUrl = window.location.origin + '/';
       window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
     } else {
-      const redirectUrl = Linking.createURL('/');
+      const redirectUrl = Linking.createURL('auth-callback');
+      console.log('Auth redirect URL:', redirectUrl);
       const result = await WebBrowser.openAuthSessionAsync(
         `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`,
         redirectUrl
       );
+      console.log('Auth result:', JSON.stringify(result));
       if (result.type === 'success' && result.url) {
-        const hash = result.url.split('#')[1];
-        if (hash) {
-          const params = new URLSearchParams(hash);
-          const sessionId = params.get('session_id');
-          if (sessionId) {
+        // Try hash fragment first (e.g. #session_id=xxx)
+        let sessionId: string | null = null;
+        const hashPart = result.url.split('#')[1];
+        if (hashPart) {
+          const hashParams = new URLSearchParams(hashPart);
+          sessionId = hashParams.get('session_id');
+        }
+        // Also try query params (e.g. ?session_id=xxx)
+        if (!sessionId) {
+          const urlParts = result.url.split('?');
+          if (urlParts[1]) {
+            const queryParams = new URLSearchParams(urlParts[1].split('#')[0]);
+            sessionId = queryParams.get('session_id');
+          }
+        }
+        if (sessionId) {
+          console.log('Got session_id, exchanging...');
+          try {
             const userData = await exchangeSession(sessionId);
             setUser(userData);
+          } catch (e) {
+            console.error('Session exchange failed:', e);
           }
+        } else {
+          console.log('No session_id found in URL:', result.url);
         }
       }
     }
