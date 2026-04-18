@@ -1,15 +1,49 @@
 import React from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Switch } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Switch, Alert, Linking as RNLinking, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
 
+const SUPPORT_EMAIL = 'propiq.review@gmail.com';
+const APP_VERSION = '1.0.0';
+
 export default function SettingsScreen() {
   const { user, signOut } = useAuth();
   const { mode, colors, toggleTheme } = useTheme();
   const router = useRouter();
+
+  const handleSignOut = () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign Out', style: 'destructive', onPress: async () => {
+            await signOut();
+          }
+        },
+      ]
+    );
+  };
+
+  const handleHelpSupport = () => {
+    const subject = encodeURIComponent('PropIQ Track - Help & Support');
+    const body = encodeURIComponent(`\n\n--- App Info ---\nVersion: ${APP_VERSION}\nUser: ${user?.email || 'N/A'}\nPlatform: ${Platform.OS}`);
+    RNLinking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`);
+  };
+
+  const handleAbout = () => {
+    Alert.alert(
+      'About PropIQ Track',
+      `Version: ${APP_VERSION}\n\nSmart Property Investment Tracker\n\nTrack your investment properties, monitor ROI, cashflow, and generate professional reports.\n\n© 2026 PropIQ Track\n\nSupport: ${SUPPORT_EMAIL}`,
+      [
+        { text: 'Contact Support', onPress: handleHelpSupport },
+        { text: 'OK', style: 'cancel' },
+      ]
+    );
+  };
 
   const SettingRow = ({ icon, label, value, onPress, rightComponent }: any) => (
     <TouchableOpacity style={[styles.settingRow, { borderBottomColor: colors.border }]}
@@ -61,14 +95,14 @@ export default function SettingsScreen() {
           <SettingRow icon="notifications" label="Notifications" value="Enabled" />
           <SettingRow icon="shield-checkmark" label="Privacy Policy" value="Data protection & rights" onPress={() => router.push('/privacy')} />
           <SettingRow icon="lock-closed" label="Security Policy" value="Cybersecurity standards" onPress={() => router.push('/security')} />
-          <SettingRow icon="help-circle" label="Help & Support" />
-          <SettingRow icon="information-circle" label="About PropIQ Track" value="Version 1.0.0" />
+          <SettingRow icon="help-circle" label="Help & Support" value="propiq.review@gmail.com" onPress={handleHelpSupport} />
+          <SettingRow icon="information-circle" label="About PropIQ Track" value={`Version ${APP_VERSION}`} onPress={handleAbout} />
         </View>
 
         {/* Account */}
         <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>ACCOUNT</Text>
         <View style={[styles.settingGroup, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <TouchableOpacity testID="sign-out-btn" style={styles.signOutBtn} onPress={signOut}>
+          <TouchableOpacity testID="sign-out-btn" style={styles.signOutBtn} onPress={handleSignOut}>
             <Ionicons name="log-out" size={18} color={colors.danger} />
             <Text style={[styles.signOutText, { color: colors.danger }]}>Sign Out</Text>
           </TouchableOpacity>
