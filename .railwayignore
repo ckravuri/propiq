@@ -1,8 +1,9 @@
+tests/
 __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
 .env
 .env.local
-*.log
-.DS_Store
+.env.*
+!.env.example
