@@ -20,3 +20,4 @@ uvicorn server:app --host 0.0.0.0 --port $PORT
 ## Health Check
 - `GET /api/health` → `{"status": "healthy"}`
 - `GET /api/health/detailed` → detailed DB/auth checks
+
