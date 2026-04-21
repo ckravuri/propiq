@@ -35,9 +35,28 @@ db = client[db_name]
 
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
-# Emergent auth endpoint (single source of truth)
-EMERGENT_AUTH_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
-EMERGENT_TIMEOUT = 10.0
+# Google OAuth — accepted audiences for native Google Sign-In ID tokens.
+# The web client ID is shared by iOS and Android native flows when `webClientId` is configured in
+# the frontend GoogleSignin.configure() call — that's why both iOS/Android tokens end up with
+# the web client ID as their `aud` claim. We still allow the platform-specific client IDs as
+# a safety net in case any future code path issues native-audience tokens.
+GOOGLE_WEB_CLIENT_ID = os.environ.get(
+    'GOOGLE_WEB_CLIENT_ID',
+    '523301849570-u5vs3u4k031secaq9b7ovl5ksjvid10n.apps.googleusercontent.com',
+)
+GOOGLE_IOS_CLIENT_ID = os.environ.get(
+    'GOOGLE_IOS_CLIENT_ID',
+    '523301849570-dd81ull5lno640g9vuhk1r7406n81s94.apps.googleusercontent.com',
+)
+GOOGLE_ANDROID_CLIENT_ID = os.environ.get(
+    'GOOGLE_ANDROID_CLIENT_ID',
+    '523301849570-3hfq7ud39lvdn9ja38pupfk45nit4bei.apps.googleusercontent.com',
+)
+GOOGLE_ALLOWED_AUDIENCES = {
+    GOOGLE_WEB_CLIENT_ID,
+    GOOGLE_IOS_CLIENT_ID,
+    GOOGLE_ANDROID_CLIENT_ID,
+}
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -185,39 +204,78 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="User not found")
     return user_doc
 
-# ==================== AUTH ROUTES ====================
+# ==================== AUTH ROUTES (Native Google Sign-In) ====================
 
-@api_router.post("/auth/session")
-async def exchange_session(request: Request, response: Response):
-    body = await request.json()
-    session_id = body.get("session_id")
-    if not session_id:
-        raise HTTPException(status_code=400, detail="session_id required")
+class GoogleAuthRequest(BaseModel):
+    id_token: str
+
+
+@api_router.post("/auth/google")
+async def google_auth(payload: GoogleAuthRequest, response: Response):
+    """Verify a Google ID token from the native @react-native-google-signin SDK and create a session.
+
+    The token is minted by Google for one of our configured OAuth client IDs. We verify the
+    signature against Google's public keys and check the audience is one of our allowed client IDs.
+    """
+    id_token_str = (payload.id_token or "").strip()
+    if not id_token_str:
+        raise HTTPException(status_code=400, detail="id_token required")
+
     try:
-        async with httpx.AsyncClient(timeout=EMERGENT_TIMEOUT) as http_client:
-            resp = await http_client.get(
-                EMERGENT_AUTH_URL,
-                headers={"X-Session-ID": session_id}
-            )
-    except httpx.TimeoutException:
-        logger.error(f"[AUTH] Emergent session exchange TIMED OUT for session_id={session_id[:8]}...")
-        raise HTTPException(status_code=504, detail="Auth provider timeout. Please retry.")
-    except Exception as e:
-        logger.error(f"[AUTH] Emergent session exchange ERROR: {type(e).__name__}: {e}")
-        raise HTTPException(status_code=502, detail="Auth provider unavailable. Please retry.")
+        from google.oauth2 import id_token as google_id_token
+        from google.auth.transport import requests as google_requests
+    except ImportError:
+        logger.error("[AUTH] google-auth library not installed")
+        raise HTTPException(status_code=500, detail="Auth backend misconfigured")
 
-    if resp.status_code != 200:
-        logger.warning(f"[AUTH] Emergent returned {resp.status_code} for session_id={session_id[:8]}... — session likely expired/consumed")
-        raise HTTPException(status_code=401, detail="Session expired. Please sign in again.")
-    data = resp.json()
-    email = data.get("email")
-    name = data.get("name", "")
-    picture = data.get("picture", "")
-    session_token = data.get("session_token", str(uuid.uuid4()))
+    # Verify against Google without a fixed audience, then check audience ourselves
+    # (v2 SDK on iOS/Android signs tokens with the web client ID as the audience, but a small
+    # subset of library versions may use the platform client ID).
+    try:
+        idinfo = google_id_token.verify_oauth2_token(
+            id_token_str,
+            google_requests.Request(),
+            # Pass None so google-auth doesn't reject on mismatch — we handle aud below
+            audience=None,
+            clock_skew_in_seconds=10,
+        )
+    except ValueError as e:
+        logger.warning(f"[AUTH] Google ID token invalid: {e}")
+        raise HTTPException(status_code=401, detail="Invalid Google ID token")
+    except Exception as e:
+        logger.error(f"[AUTH] Google token verification error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail="Could not verify Google token")
+
+    # Audience check
+    aud = idinfo.get("aud")
+    if aud not in GOOGLE_ALLOWED_AUDIENCES:
+        logger.warning(f"[AUTH] Google ID token audience mismatch: {aud}")
+        raise HTTPException(status_code=401, detail="Token audience not allowed")
+
+    # Issuer check (google-auth does this too, but be defensive)
+    iss = idinfo.get("iss", "")
+    if iss not in ("accounts.google.com", "https://accounts.google.com"):
+        logger.warning(f"[AUTH] Google ID token bad issuer: {iss}")
+        raise HTTPException(status_code=401, detail="Invalid token issuer")
+
+    # Email must be present and verified
+    email = idinfo.get("email")
+    email_verified = idinfo.get("email_verified", False)
+    if not email or not email_verified:
+        raise HTTPException(status_code=401, detail="Google account email not verified")
+
+    name = idinfo.get("name", "") or idinfo.get("given_name", "")
+    picture = idinfo.get("picture", "")
+
+    # Find or create user
     existing_user = await db.users.find_one({"email": email}, {"_id": 0})
+    now_iso = datetime.now(timezone.utc).isoformat()
     if existing_user:
         user_id = existing_user["user_id"]
-        await db.users.update_one({"email": email}, {"$set": {"name": name, "picture": picture, "updated_at": datetime.now(timezone.utc).isoformat()}})
+        await db.users.update_one(
+            {"email": email},
+            {"$set": {"name": name, "picture": picture, "updated_at": now_iso}},
+        )
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
         await db.users.insert_one({
@@ -225,15 +283,20 @@ async def exchange_session(request: Request, response: Response):
             "email": email,
             "name": name,
             "picture": picture,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat()
+            "created_at": now_iso,
+            "updated_at": now_iso,
         })
+
+    # Create a fresh 30-day session
+    session_token = str(uuid.uuid4())
     await db.user_sessions.insert_one({
         "user_id": user_id,
         "session_token": session_token,
         "expires_at": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "created_at": now_iso,
     })
+
+    # Set cookie as well for any future web use, but mobile app uses Bearer token auth
     response.set_cookie(
         key="session_token",
         value=session_token,
@@ -241,207 +304,16 @@ async def exchange_session(request: Request, response: Response):
         secure=True,
         httponly=True,
         samesite="none",
-        max_age=30 * 24 * 3600
-    )
-    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    logger.info(f"[AUTH] Web session exchange OK for user_id={user_id} email={email}")
-    return user_doc
-
-
-# ==================== POLLING-BASED AUTH (Mobile) ====================
-
-@api_router.get("/auth/mobile-callback")
-async def mobile_auth_callback(poll_token: str = Query("")):
-    """HTML page - extracts session_id from URL hash, posts to /complete-mobile, shows clear error messages"""
-    html_content = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Cache-Control" content="no-store,no-cache,must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
-<title>Signing In</title>
-<style>
-body{{background:#1C3F35;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;text-align:center}}
-.box{{max-width:420px}}
-.spinner{{width:40px;height:40px;border:4px solid rgba(255,255,255,0.2);border-top-color:#D4A574;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 20px}}
-@keyframes spin{{to{{transform:rotate(360deg)}}}}
-h1{{margin:0 0 10px;font-size:22px;font-weight:600}}
-p{{margin:8px 0;opacity:0.85;font-size:15px;line-height:1.5}}
-.err{{color:#FF6B6B}}
-button{{background:#D4A574;color:#1C3F35;border:0;padding:12px 24px;border-radius:8px;font-size:16px;font-weight:600;margin-top:16px;cursor:pointer}}
-.muted{{font-size:13px;opacity:0.6;margin-top:24px}}
-</style></head><body><div class="box">
-<div id="spinner" class="spinner"></div>
-<h1 id="title">Signing you in</h1>
-<p id="msg">Just a moment...</p>
-<button id="retry" style="display:none" onclick="location.reload()">Try Again</button>
-<p class="muted" id="foot">You can close this window once complete.</p>
-</div>
-<script>
-(function(){{
-  var title=document.getElementById('title'),msg=document.getElementById('msg'),spinner=document.getElementById('spinner'),retry=document.getElementById('retry');
-  function showError(t,m){{title.textContent=t;msg.textContent=m;msg.className='err';spinner.style.display='none';retry.style.display='inline-block'}}
-  function showSuccess(){{
-    title.textContent='Success';
-    msg.textContent='You are signed in. Returning to app...';
-    msg.className='';
-    spinner.style.display='none';
-    // Multi-strategy browser close for all platforms:
-    // 1) window.close() — works on iOS Safari / SFAuthSession
-    // 2) Custom scheme redirect to app root — on Android Chrome Custom Tabs this
-    //    launches the PropIQ app intent and auto-dismisses the custom tab.
-    //    Using "propiq:///" (root path) so expo-router lands on index and the
-    //    AuthProvider (which already has user set via polling) redirects to dashboard.
-    try{{window.close()}}catch(e){{}}
-    setTimeout(function(){{
-      try{{window.location.href='propiq:///'}}catch(e){{}}
-    }},300);
-    setTimeout(function(){{try{{window.close()}}catch(e){{}}}},800);
-  }}
-  var h=location.hash.substr(1),s=new URLSearchParams(h).get('session_id');
-  if(!s){{var q=location.search.substr(1);s=new URLSearchParams(q).get('session_id')}}
-  var pollToken='{poll_token}';
-  if(!s){{showError('Sign-in incomplete','No session detected. Please close and try again.');return}}
-  if(!pollToken){{showError('Invalid request','Missing session reference. Please close and try again.');return}}
-  var attempt=0,maxAttempts=4;
-  function tryExchange(){{
-    attempt++;
-    fetch('/api/auth/complete-mobile',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{session_id:s,poll_token:pollToken}})}})
-    .then(function(r){{
-      if(r.ok)return r.json().then(function(){{showSuccess()}});
-      return r.json().catch(function(){{return{{}}}}).then(function(data){{
-        var code=r.status,detail=data&&data.detail?data.detail:'';
-        if(code===401){{showError('Session expired','Your sign-in link is no longer valid. Please close this window and tap Sign In again.')}}
-        else if(code===504||code===502){{
-          if(attempt<maxAttempts){{msg.textContent='Connecting to auth provider (attempt '+attempt+' of '+maxAttempts+')...';setTimeout(tryExchange,2000)}}
-          else{{showError('Auth provider slow','Could not reach auth provider. Please close and try again in a moment.')}}
-        }}
-        else if(code>=500){{
-          if(attempt<maxAttempts){{msg.textContent='Temporary server issue, retrying ('+attempt+'/'+maxAttempts+')...';setTimeout(tryExchange,2000)}}
-          else{{showError('Server error',detail||'Please close and try again.')}}
-        }}
-        else{{showError('Sign-in failed',detail||'Please close and try again.')}}
-      }});
-    }})
-    .catch(function(err){{
-      if(attempt<maxAttempts){{msg.textContent='Connection issue, retrying ('+attempt+'/'+maxAttempts+')...';setTimeout(tryExchange,2000)}}
-      else{{showError('Connection error','Please check your internet and try again.')}}
-    }});
-  }}
-  tryExchange();
-}})();
-</script></body></html>"""
-    return HTMLResponse(
-        content=html_content,
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        }
-    )
-
-
-@api_router.post("/auth/complete-mobile")
-async def complete_mobile_auth(request: Request):
-    """Called by the mobile callback page to exchange session and store result for polling"""
-    body = await request.json()
-    session_id = body.get("session_id")
-    poll_token = body.get("poll_token")
-    if not session_id or not poll_token:
-        raise HTTPException(status_code=400, detail="session_id and poll_token required")
-
-    # Idempotency: if this poll_token already has a completed session, return it directly
-    # (handles case where the HTML page retries after we already stored the result)
-    existing_poll = await db.auth_polls.find_one({"poll_token": poll_token}, {"_id": 0})
-    if existing_poll and existing_poll.get("session_token"):
-        logger.info("[AUTH] complete-mobile: poll_token already completed, returning cached result")
-        user_doc = await db.users.find_one({"user_id": existing_poll["user_id"]}, {"_id": 0})
-        return {"status": "ok", "user": user_doc}
-
-    # Exchange session with Emergent (with timeout)
-    try:
-        async with httpx.AsyncClient(timeout=EMERGENT_TIMEOUT) as http_client:
-            resp = await http_client.get(
-                EMERGENT_AUTH_URL,
-                headers={"X-Session-ID": session_id}
-            )
-    except httpx.TimeoutException:
-        logger.error(f"[AUTH] complete-mobile: Emergent TIMEOUT for session_id={session_id[:8]}...")
-        raise HTTPException(status_code=504, detail="Auth provider timed out. Please retry.")
-    except Exception as e:
-        logger.error(f"[AUTH] complete-mobile: Emergent ERROR {type(e).__name__}: {e}")
-        raise HTTPException(status_code=502, detail="Auth provider unavailable. Please retry.")
-
-    if resp.status_code != 200:
-        logger.warning(f"[AUTH] complete-mobile: Emergent returned {resp.status_code} for session_id={session_id[:8]}... (likely consumed/expired)")
-        raise HTTPException(status_code=401, detail="Sign-in link expired. Please tap Sign In again from the app.")
-
-    data = resp.json()
-    email = data.get("email")
-    name = data.get("name", "")
-    picture = data.get("picture", "")
-    session_token = data.get("session_token", str(uuid.uuid4()))
-
-    if not email:
-        logger.error(f"[AUTH] complete-mobile: Emergent response missing email: {data}")
-        raise HTTPException(status_code=502, detail="Invalid response from auth provider. Please retry.")
-
-    existing_user = await db.users.find_one({"email": email}, {"_id": 0})
-    if existing_user:
-        user_id = existing_user["user_id"]
-        await db.users.update_one({"email": email}, {"$set": {"name": name, "picture": picture, "updated_at": datetime.now(timezone.utc).isoformat()}})
-    else:
-        user_id = f"user_{uuid.uuid4().hex[:12]}"
-        await db.users.insert_one({
-            "user_id": user_id, "email": email, "name": name, "picture": picture,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        })
-
-    await db.user_sessions.insert_one({
-        "user_id": user_id, "session_token": session_token,
-        "expires_at": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
-
-    # Store the completed auth result for polling (upsert so double-submits are idempotent)
-    await db.auth_polls.update_one(
-        {"poll_token": poll_token},
-        {"$set": {
-            "poll_token": poll_token,
-            "session_token": session_token,
-            "user_id": user_id,
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-            "consumed": False,
-        }},
-        upsert=True,
+        max_age=30 * 24 * 3600,
     )
 
     user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    logger.info(f"[AUTH] complete-mobile OK user_id={user_id} email={email} poll_token={poll_token[:16]}...")
-    return {"status": "ok", "user": user_doc}
+    logger.info(f"[AUTH] Google sign-in OK user_id={user_id} email={email}")
+    return {
+        "session_token": session_token,
+        "user": user_doc,
+    }
 
-
-@api_router.get("/auth/poll")
-async def poll_auth_status(token: str = Query(...)):
-    """App polls this endpoint to check if auth completed.
-    Keeps the record for 5 minutes after first read so duplicate polls still succeed."""
-    doc = await db.auth_polls.find_one({"poll_token": token}, {"_id": 0})
-    if not doc:
-        return {"status": "pending"}
-
-    # Mark as consumed but do not delete immediately — tolerate duplicate polls
-    # (cleanup happens below for records older than 5 minutes)
-    if not doc.get("consumed"):
-        await db.auth_polls.update_one({"poll_token": token}, {"$set": {"consumed": True, "consumed_at": datetime.now(timezone.utc).isoformat()}})
-
-    # Background cleanup: remove any poll records older than 5 minutes
-    try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
-        await db.auth_polls.delete_many({"completed_at": {"$lt": cutoff}})
-    except Exception:
-        pass
-
-    user_doc = await db.users.find_one({"user_id": doc["user_id"]}, {"_id": 0})
-    return {"status": "completed", "session_token": doc["session_token"], "user": user_doc}
 
 @api_router.get("/auth/me")
 async def get_me(request: Request):
@@ -1395,16 +1267,8 @@ async def health_detailed():
     try:
         result["checks"]["users"] = await db.users.count_documents({})
         result["checks"]["active_sessions"] = await db.user_sessions.count_documents({})
-        result["checks"]["pending_polls"] = await db.auth_polls.count_documents({})
     except Exception as e:
         result["checks"]["counts"] = f"error: {type(e).__name__}"
-    # Emergent auth provider reachability
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as hc:
-            r = await hc.get(EMERGENT_AUTH_URL, headers={"X-Session-ID": "healthcheck"})
-            result["checks"]["emergent_auth"] = f"reachable (status={r.status_code})"
-    except Exception as e:
-        result["checks"]["emergent_auth"] = f"unreachable: {type(e).__name__}"
     return result
 
 @api_router.get("/privacy-policy", response_class=HTMLResponse)
