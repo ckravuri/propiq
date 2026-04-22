@@ -27,6 +27,10 @@ python-dotenv==1.2.2
 # Google Sign-In: verifying ID tokens
 google-auth==2.49.1
 
+# Apple Sign-In: verifying Apple identity tokens (JWT w/ RSA signature)
+PyJWT[crypto]==2.12.1
+cryptography==46.0.7
+
 # Form/multipart handling
 python-multipart==0.0.24
 

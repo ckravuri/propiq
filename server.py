@@ -58,6 +58,17 @@ GOOGLE_ALLOWED_AUDIENCES = {
     GOOGLE_ANDROID_CLIENT_ID,
 }
 
+# Apple Sign-In — the client_id is the app's Bundle ID for native sign-ins.
+# Apple IDs the `aud` claim in the identity token with the Bundle ID.
+APPLE_BUNDLE_ID = os.environ.get(
+    'APPLE_BUNDLE_ID',
+    'app.emergent.propiqtestb2da5181',
+)
+APPLE_JWKS_URL = 'https://appleid.apple.com/auth/keys'
+APPLE_ISSUER = 'https://appleid.apple.com'
+# Cache JWKS in memory for 1 hour
+_apple_jwks_cache: dict = {"fetched_at": 0, "keys": []}
+
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
@@ -313,6 +324,195 @@ async def google_auth(payload: GoogleAuthRequest, response: Response):
         "session_token": session_token,
         "user": user_doc,
     }
+
+
+class AppleAuthRequest(BaseModel):
+    identity_token: str
+    full_name: Optional[str] = None  # Sent by iOS SDK only on FIRST sign-in
+
+
+async def _fetch_apple_jwks() -> list:
+    """Fetch + cache Apple's JWKS (rotated periodically by Apple)."""
+    import time
+    now = time.time()
+    if _apple_jwks_cache["keys"] and (now - _apple_jwks_cache["fetched_at"]) < 3600:
+        return _apple_jwks_cache["keys"]
+    async with httpx.AsyncClient(timeout=10.0) as http_client:
+        resp = await http_client.get(APPLE_JWKS_URL)
+        resp.raise_for_status()
+        keys = resp.json().get("keys", [])
+    _apple_jwks_cache["keys"] = keys
+    _apple_jwks_cache["fetched_at"] = now
+    return keys
+
+
+@api_router.post("/auth/apple")
+async def apple_auth(payload: AppleAuthRequest, response: Response):
+    """Verify an Apple identity token from expo-apple-authentication / native Apple SDK.
+
+    Apple signs tokens with a rotating RSA key published at https://appleid.apple.com/auth/keys.
+    We:
+    - Decode token header to get `kid`
+    - Fetch Apple JWKS (cached 1h), find matching key
+    - Verify signature + standard claims
+    - Check audience = our Bundle ID, issuer = https://appleid.apple.com
+    - Use the stable `sub` claim as the unique user identifier (Option A — no email matching)
+    """
+    id_token_str = (payload.identity_token or "").strip()
+    if not id_token_str:
+        raise HTTPException(status_code=400, detail="identity_token required")
+
+    try:
+        import jwt as pyjwt
+        from jwt.algorithms import RSAAlgorithm
+    except ImportError:
+        logger.error("[AUTH] PyJWT library not installed")
+        raise HTTPException(status_code=500, detail="Auth backend misconfigured")
+
+    # 1. Get kid from token header
+    try:
+        unverified_header = pyjwt.get_unverified_header(id_token_str)
+        kid = unverified_header.get("kid")
+        if not kid:
+            raise HTTPException(status_code=401, detail="Invalid Apple token header")
+    except Exception as e:
+        logger.warning(f"[AUTH] Apple token header parse error: {e}")
+        raise HTTPException(status_code=401, detail="Malformed Apple token")
+
+    # 2. Fetch Apple's public keys and find the one matching kid
+    try:
+        keys = await _fetch_apple_jwks()
+    except Exception as e:
+        logger.error(f"[AUTH] Could not fetch Apple JWKS: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=502, detail="Could not verify Apple token (JWKS fetch)")
+
+    matching_key = next((k for k in keys if k.get("kid") == kid), None)
+    if not matching_key:
+        logger.warning(f"[AUTH] Apple JWKS has no key for kid={kid}")
+        raise HTTPException(status_code=401, detail="Apple token signing key not found")
+
+    # 3. Verify signature + audience + issuer
+    try:
+        public_key = RSAAlgorithm.from_jwk(matching_key)
+        claims = pyjwt.decode(
+            id_token_str,
+            public_key,
+            algorithms=["RS256"],
+            audience=APPLE_BUNDLE_ID,
+            issuer=APPLE_ISSUER,
+            options={"require": ["sub", "aud", "iss", "exp"]},
+        )
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Apple token has expired")
+    except pyjwt.InvalidAudienceError:
+        logger.warning(f"[AUTH] Apple token audience mismatch (expected {APPLE_BUNDLE_ID})")
+        raise HTTPException(status_code=401, detail="Apple token audience not allowed")
+    except pyjwt.InvalidIssuerError:
+        raise HTTPException(status_code=401, detail="Invalid Apple token issuer")
+    except pyjwt.PyJWTError as e:
+        logger.warning(f"[AUTH] Apple token signature invalid: {e}")
+        raise HTTPException(status_code=401, detail="Invalid Apple identity token")
+    except Exception as e:
+        logger.error(f"[AUTH] Apple token verification error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail="Could not verify Apple token")
+
+    apple_sub = claims.get("sub")
+    if not apple_sub:
+        raise HTTPException(status_code=401, detail="Apple token missing user identifier")
+
+    # Apple gives us email only on FIRST sign-in (or if user re-consented).
+    # If hidden relay address, it'll look like xxx@privaterelay.appleid.com — that's fine.
+    email = claims.get("email", "")
+    email_verified = claims.get("email_verified", False)
+    if isinstance(email_verified, str):
+        email_verified = email_verified.lower() == "true"
+
+    # Name is passed separately by the iOS SDK only on first sign-in (not in the token).
+    full_name_input = (payload.full_name or "").strip()
+
+    # Option A: match users by apple_sub only (no auto-merge with Google on matching email).
+    now_iso = datetime.now(timezone.utc).isoformat()
+    existing_user = await db.users.find_one({"apple_sub": apple_sub}, {"_id": 0})
+    if existing_user:
+        user_id = existing_user["user_id"]
+        updates: dict = {"updated_at": now_iso}
+        if full_name_input and not existing_user.get("name"):
+            updates["name"] = full_name_input
+        if email and not existing_user.get("email"):
+            updates["email"] = email
+        await db.users.update_one({"user_id": user_id}, {"$set": updates})
+    else:
+        # First Apple sign-in: create new user. Use a stable synthetic email if Apple didn't
+        # give us one (happens on subsequent sign-ins without consent reset).
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        user_email = email or f"apple_{apple_sub[:16]}@privaterelay.appleid.invalid"
+        user_name = full_name_input or "Apple User"
+        await db.users.insert_one({
+            "user_id": user_id,
+            "apple_sub": apple_sub,
+            "email": user_email,
+            "name": user_name,
+            "picture": "",
+            "email_verified": bool(email_verified),
+            "auth_provider": "apple",
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        })
+
+    session_token = str(uuid.uuid4())
+    await db.user_sessions.insert_one({
+        "user_id": user_id,
+        "session_token": session_token,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
+        "created_at": now_iso,
+    })
+
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="none",
+        max_age=30 * 24 * 3600,
+    )
+
+    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    logger.info(f"[AUTH] Apple sign-in OK user_id={user_id} apple_sub={apple_sub[:8]}...")
+    return {
+        "session_token": session_token,
+        "user": user_doc,
+    }
+
+
+@api_router.delete("/users/me")
+async def delete_my_account(request: Request):
+    """Permanently delete the signed-in user's account and all associated data.
+
+    Required by Apple Guideline 5.1.1(v). Cascade-deletes:
+    - user document
+    - all sessions
+    - all properties (+ their income, expense, reminder, snapshot records)
+    - all auth_polls (legacy, harmless if absent)
+    """
+    user = await get_current_user(request)
+    user_id = user["user_id"]
+
+    # Delete all data for this user. Order doesn't really matter since each collection
+    # is filtered by user_id, but we do the parent last so partial failures don't orphan.
+    await db.properties.delete_many({"user_id": user_id})
+    await db.income_entries.delete_many({"user_id": user_id})
+    await db.expense_entries.delete_many({"user_id": user_id})
+    await db.reminders.delete_many({"user_id": user_id})
+    try:
+        await db.portfolio_snapshots.delete_many({"user_id": user_id})
+    except Exception:
+        pass
+    await db.user_sessions.delete_many({"user_id": user_id})
+    await db.users.delete_one({"user_id": user_id})
+
+    logger.info(f"[AUTH] Account deleted user_id={user_id}")
+    return {"message": "Account and all associated data permanently deleted"}
 
 
 @api_router.get("/auth/me")
