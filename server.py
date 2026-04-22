@@ -5,6 +5,7 @@ from starlette.responses import HTMLResponse, StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -699,9 +700,13 @@ async def get_dashboard(request: Request):
     now = datetime.now(timezone.utc)
     year_start = datetime(now.year, 1, 1, tzinfo=timezone.utc).isoformat()
 
-    properties = await db.properties.find({"user_id": user_id}, {"_id": 0}).to_list(1000)
-    all_income = await db.income_entries.find({"user_id": user_id}, {"_id": 0}).to_list(10000)
-    all_expenses = await db.expense_entries.find({"user_id": user_id}, {"_id": 0}).to_list(10000)
+    # Run 3 Mongo queries in parallel — saves ~2/3 of the round-trip latency on
+    # managed Mongo Atlas where each query has ~200ms ping overhead.
+    properties, all_income, all_expenses = await asyncio.gather(
+        db.properties.find({"user_id": user_id}, {"_id": 0}).to_list(1000),
+        db.income_entries.find({"user_id": user_id}, {"_id": 0}).to_list(10000),
+        db.expense_entries.find({"user_id": user_id}, {"_id": 0}).to_list(10000),
+    )
 
     total_market_value = sum(p.get("current_estimated_value", 0) for p in properties)
     total_purchase_value = sum(p.get("purchase_price", 0) for p in properties)
