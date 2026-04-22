@@ -37,4 +37,7 @@ python-multipart==0.0.24
 # TLS + utilities
 certifi==2026.2.25
 
-# Note: emergentintegrations is optional — server.py handles ImportError gracefully
+# Emergent LLM integration (hosted on Emergent's public CloudFront pypi index).
+# Requires EMERGENT_LLM_KEY env var to be set on Railway for AI Insights to work.
+--extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
+emergentintegrations==0.1.0
