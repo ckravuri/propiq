@@ -1476,6 +1476,195 @@ async def health_detailed():
         result["checks"]["counts"] = f"error: {type(e).__name__}"
     return result
 
+@api_router.get("/admin/stats")
+async def admin_stats(token: str = Query(...), format: str = Query(default="html")):
+    """Protected admin endpoint to view aggregate usage stats.
+    Access via ?token=<ADMIN_TOKEN> (set as Railway env var).
+    Defaults to an HTML dashboard; pass ?format=json for raw JSON.
+    No PII is exposed beyond partially-masked emails of the 10 most recent signups.
+    """
+    admin_token = os.environ.get("ADMIN_TOKEN", "")
+    if not admin_token or token != admin_token:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    now = datetime.now(timezone.utc)
+    seven_days_ago_iso = (now - timedelta(days=7)).isoformat()
+    thirty_days_ago_iso = (now - timedelta(days=30)).isoformat()
+    today_start_iso = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+    # Parallel count queries for speed
+    (
+        total_users,
+        new_users_today,
+        new_users_7d,
+        new_users_30d,
+        apple_users,
+        total_properties,
+        total_income,
+        total_expenses,
+        total_reminders,
+        sessions_last_7d,
+        sessions_last_30d,
+    ) = await asyncio.gather(
+        db.users.count_documents({}),
+        db.users.count_documents({"created_at": {"$gte": today_start_iso}}),
+        db.users.count_documents({"created_at": {"$gte": seven_days_ago_iso}}),
+        db.users.count_documents({"created_at": {"$gte": thirty_days_ago_iso}}),
+        db.users.count_documents({"apple_sub": {"$exists": True}}),
+        db.properties.count_documents({}),
+        db.income_entries.count_documents({}),
+        db.expense_entries.count_documents({}),
+        db.reminders.count_documents({}),
+        db.user_sessions.count_documents({"created_at": {"$gte": seven_days_ago_iso}}),
+        db.user_sessions.count_documents({"created_at": {"$gte": thirty_days_ago_iso}}),
+    )
+
+    # Active users = distinct user_id among recent sessions
+    active_7d_ids = await db.user_sessions.distinct(
+        "user_id", {"created_at": {"$gte": seven_days_ago_iso}}
+    )
+    active_30d_ids = await db.user_sessions.distinct(
+        "user_id", {"created_at": {"$gte": thirty_days_ago_iso}}
+    )
+    google_users = total_users - apple_users
+
+    # 10 most recent signups (email partially masked)
+    recent = await db.users.find(
+        {}, {"_id": 0, "name": 1, "email": 1, "apple_sub": 1, "created_at": 1}
+    ).sort("created_at", -1).limit(10).to_list(length=10)
+
+    def _mask_email(e: str) -> str:
+        if not e or "@" not in e:
+            return e or ""
+        local, domain = e.split("@", 1)
+        if len(local) <= 2:
+            return local[0] + "***@" + domain
+        return local[:2] + "***@" + domain
+
+    recent_users = [
+        {
+            "name": u.get("name", "") or "—",
+            "email": _mask_email(u.get("email", "") or ""),
+            "provider": "apple" if u.get("apple_sub") else "google",
+            "joined": u.get("created_at", ""),
+        }
+        for u in recent
+    ]
+
+    payload = {
+        "generated_at": now.isoformat(),
+        "totals": {
+            "users": total_users,
+            "properties": total_properties,
+            "income_entries": total_income,
+            "expense_entries": total_expenses,
+            "reminders": total_reminders,
+        },
+        "users": {
+            "new_today": new_users_today,
+            "new_last_7d": new_users_7d,
+            "new_last_30d": new_users_30d,
+            "active_last_7d": len(active_7d_ids),
+            "active_last_30d": len(active_30d_ids),
+            "by_provider": {"google": google_users, "apple": apple_users},
+        },
+        "sessions": {
+            "last_7d": sessions_last_7d,
+            "last_30d": sessions_last_30d,
+        },
+        "recent_users": recent_users,
+    }
+
+    if format.lower() == "json":
+        return payload
+
+    # Mobile-friendly HTML dashboard
+    def _stat_card(label: str, value, hint: str = "") -> str:
+        hint_html = f'<div class="hint">{hint}</div>' if hint else ""
+        return (
+            f'<div class="card"><div class="label">{label}</div>'
+            f'<div class="value">{value}</div>{hint_html}</div>'
+        )
+
+    recent_rows = "".join(
+        f'<tr><td>{u["name"]}</td><td>{u["email"]}</td>'
+        f'<td><span class="chip chip-{u["provider"]}">{u["provider"]}</span></td>'
+        f'<td>{(u["joined"] or "")[:10]}</td></tr>'
+        for u in recent_users
+    ) or '<tr><td colspan="4" class="empty">No users yet</td></tr>'
+
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>PropIQ Admin Stats</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#F5F5F4;color:#1C1917;padding:16px;max-width:720px;margin:0 auto;padding-bottom:48px}}
+h1{{color:#1C3F35;font-size:24px;margin-bottom:4px}}
+.sub{{color:#78716C;font-size:13px;margin-bottom:20px}}
+h2{{color:#1C3F35;font-size:16px;margin:24px 0 12px;font-weight:600}}
+.grid{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}
+.grid-3{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}}
+.card{{background:#fff;border-radius:12px;padding:14px 12px;border:1px solid #E7E5E4}}
+.label{{color:#78716C;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600}}
+.value{{color:#1C3F35;font-size:26px;font-weight:700;margin-top:4px}}
+.hint{{color:#A8A29E;font-size:11px;margin-top:2px}}
+table{{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #E7E5E4}}
+th,td{{padding:10px 8px;text-align:left;font-size:13px;border-bottom:1px solid #F5F5F4}}
+th{{background:#FAFAF9;color:#57534E;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600}}
+tr:last-child td{{border-bottom:none}}
+.empty{{text-align:center;color:#A8A29E;padding:20px;font-style:italic}}
+.chip{{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;text-transform:capitalize}}
+.chip-google{{background:#DBEAFE;color:#1E40AF}}
+.chip-apple{{background:#E7E5E4;color:#1C1917}}
+.footer{{margin-top:24px;color:#A8A29E;font-size:11px;text-align:center}}
+.refresh{{display:inline-block;background:#1C3F35;color:#fff;padding:8px 14px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;margin-top:12px}}
+</style></head><body>
+<h1>📊 PropIQ Admin Stats</h1>
+<div class="sub">Generated {now.strftime('%Y-%m-%d %H:%M UTC')}</div>
+
+<h2>Portfolio Totals</h2>
+<div class="grid">
+  {_stat_card("Users", total_users)}
+  {_stat_card("Properties", total_properties)}
+  {_stat_card("Income entries", total_income)}
+  {_stat_card("Expense entries", total_expenses)}
+</div>
+
+<h2>Signups</h2>
+<div class="grid-3">
+  {_stat_card("Today", new_users_today)}
+  {_stat_card("Last 7 days", new_users_7d)}
+  {_stat_card("Last 30 days", new_users_30d)}
+</div>
+
+<h2>Active Users (via sessions)</h2>
+<div class="grid">
+  {_stat_card("Active 7d", len(active_7d_ids), f"{sessions_last_7d} session starts")}
+  {_stat_card("Active 30d", len(active_30d_ids), f"{sessions_last_30d} session starts")}
+</div>
+
+<h2>Sign-in Provider</h2>
+<div class="grid">
+  {_stat_card("Google", google_users)}
+  {_stat_card("Apple", apple_users)}
+</div>
+
+<h2>Recent Signups (last 10)</h2>
+<table>
+<thead><tr><th>Name</th><th>Email</th><th>Via</th><th>Joined</th></tr></thead>
+<tbody>{recent_rows}</tbody>
+</table>
+
+<div class="footer">
+  <a class="refresh" href="?token={token}">🔄 Refresh</a><br/><br/>
+  For raw JSON: append <code>&amp;format=json</code>
+</div>
+</body></html>"""
+    return HTMLResponse(content=html)
+
+
 @api_router.get("/privacy-policy", response_class=HTMLResponse)
 async def privacy_policy_web():
     """Web-accessible privacy policy page (required for App Store / Play Store)"""
