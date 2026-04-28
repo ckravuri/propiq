@@ -1723,6 +1723,123 @@ async def ads_txt():
     return Response(content=content, media_type="text/plain")
 
 
+# Public marketing landing page served at the ROOT of the backend domain.
+# This is what App Store Connect's Marketing URL points to so Apple reviewers
+# (and any user who follows the App Store "Developer Website" link) see a real
+# product page describing PropIQ Track instead of a 404.
+@app.get("/", response_class=HTMLResponse)
+async def marketing_landing():
+    return HTMLResponse(content="""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="description" content="PropIQ Track — Smart property investment tracking. Manage your portfolio, rental income, expenses, and get AI-powered insights on iOS and Android.">
+<title>PropIQ Track — Smart Property Investment Tracking</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#F5F5F4;color:#1C1917;line-height:1.6;-webkit-font-smoothing:antialiased}
+.hero{background:linear-gradient(135deg,#1C3F35 0%,#2A5A4D 100%);color:#fff;padding:64px 24px 80px;text-align:center}
+.hero-inner{max-width:760px;margin:0 auto}
+.logo-mark{display:inline-flex;align-items:center;justify-content:center;width:72px;height:72px;border-radius:18px;background:rgba(255,255,255,0.12);margin-bottom:18px;font-size:36px}
+h1{font-size:38px;font-weight:700;letter-spacing:-1px;margin-bottom:10px}
+.tagline{font-size:18px;opacity:.85;margin-bottom:28px}
+.lead{font-size:16px;opacity:.9;max-width:560px;margin:0 auto 36px}
+.btns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:14px 22px;border-radius:14px;text-decoration:none;font-weight:600;font-size:15px;transition:transform .15s ease}
+.btn:hover{transform:translateY(-2px)}
+.btn-primary{background:#fff;color:#1C3F35}
+.btn-secondary{background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.25)}
+.section{max-width:980px;margin:0 auto;padding:64px 24px}
+.section-title{font-size:28px;font-weight:700;color:#1C3F35;margin-bottom:8px;text-align:center}
+.section-sub{color:#78716C;text-align:center;margin-bottom:40px;font-size:16px}
+.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}
+.feature{background:#fff;border:1px solid #E7E5E4;border-radius:16px;padding:24px}
+.feature-icon{width:44px;height:44px;border-radius:12px;background:#1C3F3520;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:14px}
+.feature h3{font-size:17px;font-weight:600;margin-bottom:6px;color:#1C3F35}
+.feature p{font-size:14px;color:#57534E}
+.footer{background:#1C3F35;color:#fff;padding:36px 24px;text-align:center;margin-top:48px}
+.footer-links{display:flex;gap:20px;justify-content:center;flex-wrap:wrap;margin-bottom:18px}
+.footer-links a{color:#fff;opacity:.8;text-decoration:none;font-size:14px}
+.footer-links a:hover{opacity:1;text-decoration:underline}
+.footer-copy{opacity:.6;font-size:13px}
+.contact{margin-top:8px;font-size:13px;opacity:.7}
+.contact a{color:#fff}
+@media (max-width:600px){h1{font-size:30px}.tagline{font-size:16px}.section-title{font-size:24px}}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-inner">
+    <div class="logo-mark">🏠</div>
+    <h1>PropIQ Track</h1>
+    <div class="tagline">Smart Property Investment Tracking</div>
+    <p class="lead">
+      Take control of your real estate portfolio. Track properties, rental income, expenses,
+      and get AI-powered investment insights — all in one place, designed for serious investors.
+    </p>
+    <div class="btns">
+      <a class="btn btn-primary" href="https://apps.apple.com/app/id6753059398" target="_blank" rel="noopener">📱 Download on the App Store</a>
+      <a class="btn btn-secondary" href="#features">Learn more</a>
+    </div>
+  </div>
+</div>
+
+<section class="section" id="features">
+  <h2 class="section-title">Everything you need to grow your portfolio</h2>
+  <p class="section-sub">Built for property investors who want clarity, not spreadsheets.</p>
+  <div class="features">
+    <div class="feature">
+      <div class="feature-icon">📊</div>
+      <h3>Portfolio Analytics</h3>
+      <p>Track total portfolio value, equity, ROI, and growth across every property — in one glance.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">💰</div>
+      <h3>Income & Expense Tracking</h3>
+      <p>Record rent, bills, repairs and recurring costs. See net cashflow per property and across your portfolio.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">📑</div>
+      <h3>Tax-Ready Reports</h3>
+      <p>Export PDF and CSV reports per property, per year. Save hours at tax time.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">✨</div>
+      <h3>AI Investment Insights</h3>
+      <p>Personalised analysis on each property's performance — powered by modern AI models.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">🔔</div>
+      <h3>Bill Reminders</h3>
+      <p>Never miss a council rate, insurance renewal or loan refinance — set custom reminders per property.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">🔒</div>
+      <h3>Private & Secure</h3>
+      <p>Sign in with Apple or Google. Your financial data stays encrypted in transit and at rest.</p>
+    </div>
+  </div>
+</section>
+
+<div class="footer">
+  <div class="footer-links">
+    <a href="/api/privacy-policy">Privacy Policy</a>
+    <a href="/api/security-policy">Security Policy</a>
+    <a href="https://apps.apple.com/app/id6753059398" target="_blank" rel="noopener">App Store</a>
+  </div>
+  <div class="contact">
+    Support: <a href="mailto:support@propiq.app">support@propiq.app</a> &nbsp;·&nbsp;
+    Privacy: <a href="mailto:privacy@propiq.app">privacy@propiq.app</a>
+  </div>
+  <div class="footer-copy" style="margin-top:14px">© 2026 PropIQ Track. All rights reserved.</div>
+</div>
+
+</body>
+</html>""")
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
