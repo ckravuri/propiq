@@ -1703,6 +1703,26 @@ async def security_policy_web():
 # Include router
 app.include_router(api_router)
 
+
+# Root-level static files served outside /api/ prefix.
+# AdMob requires app-ads.txt at the root of the developer's domain (i.e.
+# https://backend-production-960d.up.railway.app/app-ads.txt) so that it can
+# verify ownership of the iOS / Android apps after crawling the Privacy Policy
+# URL listed in App Store Connect / Play Console.
+@app.get("/app-ads.txt", response_class=Response)
+async def app_ads_txt():
+    content = "google.com, pub-9480363771925708, DIRECT, f08c47fec0942fa0\n"
+    return Response(content=content, media_type="text/plain")
+
+
+# Optional: also serve ads.txt for any web inventory (harmless if unused; some
+# crawlers probe both filenames).
+@app.get("/ads.txt", response_class=Response)
+async def ads_txt():
+    content = "google.com, pub-9480363771925708, DIRECT, f08c47fec0942fa0\n"
+    return Response(content=content, media_type="text/plain")
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
