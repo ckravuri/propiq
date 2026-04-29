@@ -1724,9 +1724,6 @@ async def ads_txt():
 
 
 # Public marketing landing page served at the ROOT of the backend domain.
-# This is what App Store Connect's Marketing URL points to so Apple reviewers
-# (and any user who follows the App Store "Developer Website" link) see a real
-# product page describing PropIQ Track instead of a 404.
 @app.get("/", response_class=HTMLResponse)
 async def marketing_landing():
     return HTMLResponse(content="""<!DOCTYPE html>
@@ -1847,6 +1844,108 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Public Support page — listed as the App Store Connect Support URL.
+# Apple requires this URL to provide users with a way to get help.
+@app.get("/support", response_class=HTMLResponse)
+async def support_page():
+    return HTMLResponse(content="""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>PropIQ Track — Support</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#F5F5F4;color:#1C1917;line-height:1.6;-webkit-font-smoothing:antialiased}
+.hero{background:linear-gradient(135deg,#1C3F35 0%,#2A5A4D 100%);color:#fff;padding:48px 24px;text-align:center}
+.hero h1{font-size:32px;font-weight:700;margin-bottom:8px}
+.hero p{opacity:.85;font-size:16px}
+.container{max-width:760px;margin:0 auto;padding:40px 24px}
+.card{background:#fff;border:1px solid #E7E5E4;border-radius:16px;padding:28px;margin-bottom:18px}
+.card h2{color:#1C3F35;font-size:18px;font-weight:600;margin-bottom:10px}
+.card p{color:#57534E;font-size:15px;margin-bottom:8px}
+.card a{color:#1C3F35;font-weight:600;text-decoration:none;border-bottom:1px solid #1C3F35}
+.card a:hover{opacity:.7}
+.faq h3{color:#1C3F35;font-size:15px;font-weight:600;margin-top:14px;margin-bottom:4px}
+.faq p{color:#57534E;font-size:14px;margin-bottom:10px}
+.footer{text-align:center;padding:24px;color:#78716C;font-size:13px}
+.footer a{color:#1C3F35;text-decoration:none}
+.contact-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px}
+.contact-item{padding:14px;background:#F5F5F4;border-radius:10px}
+.contact-item .label{font-size:12px;color:#78716C;text-transform:uppercase;font-weight:600;margin-bottom:4px}
+.contact-item .value{font-size:14px;color:#1C3F35;font-weight:600}
+@media (max-width:600px){.hero h1{font-size:26px}}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Need Help?</h1>
+  <p>We're here to help you get the most out of PropIQ Track.</p>
+</div>
+
+<div class="container">
+
+  <div class="card">
+    <h2>📧 Contact Us</h2>
+    <p>The fastest way to reach us is by email. We aim to respond within 1 business day.</p>
+    <div class="contact-grid">
+      <div class="contact-item">
+        <div class="label">Support</div>
+        <div class="value"><a href="mailto:support@propiq.app">support@propiq.app</a></div>
+      </div>
+      <div class="contact-item">
+        <div class="label">Privacy</div>
+        <div class="value"><a href="mailto:privacy@propiq.app">privacy@propiq.app</a></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card faq">
+    <h2>❓ Frequently Asked Questions</h2>
+
+    <h3>How do I add a new property?</h3>
+    <p>Open the Properties tab, tap the "+" button at the top right, and fill in the property details. You can edit anything later.</p>
+
+    <h3>Can I track multiple properties?</h3>
+    <p>Yes — there's no limit. PropIQ Track is built for portfolios of any size.</p>
+
+    <h3>How does the AI Insights feature work?</h3>
+    <p>For each property, PropIQ analyses your purchase price, current value, income, expenses, and ROI to surface personalised insights about performance and improvement areas.</p>
+
+    <h3>How do I export tax reports?</h3>
+    <p>Open the Reports tab and choose the property and time period. You can export as PDF or CSV — perfect for your accountant.</p>
+
+    <h3>How do I delete my account?</h3>
+    <p>Open Settings → scroll to "Danger Zone" → tap "Delete Account". This permanently removes your account and all associated data.</p>
+
+    <h3>Is my financial data secure?</h3>
+    <p>Yes. All data is encrypted in transit (HTTPS) and at rest. You sign in with Apple or Google — we never store passwords.</p>
+
+    <h3>I'm having trouble signing in</h3>
+    <p>Make sure you're using the same Apple ID or Google account as before. If issues persist, please email <a href="mailto:support@propiq.app">support@propiq.app</a> with a description of what's happening.</p>
+  </div>
+
+  <div class="card">
+    <h2>📋 Useful Links</h2>
+    <p>
+      <a href="/api/privacy-policy">Privacy Policy</a> &nbsp;·&nbsp;
+      <a href="/api/security-policy">Security Policy</a> &nbsp;·&nbsp;
+      <a href="/">Home</a>
+    </p>
+  </div>
+
+</div>
+
+<div class="footer">
+  © 2026 PropIQ Track. All rights reserved.<br>
+  Need to <a href="mailto:support@propiq.app">email support</a>? We respond within 1 business day.
+</div>
+
+</body>
+</html>""")
 
 @app.on_event("startup")
 async def startup_init():
