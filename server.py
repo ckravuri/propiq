@@ -1780,7 +1780,7 @@ h1{font-size:38px;font-weight:700;letter-spacing:-1px;margin-bottom:10px}
       and get AI-powered investment insights — all in one place, designed for serious investors.
     </p>
     <div class="btns">
-      <a class="btn btn-primary" href="https://apps.apple.com/app/id6753059398" target="_blank" rel="noopener">📱 Download on the App Store</a>
+      <a class="btn btn-primary" href="https://apps.apple.com/app/id6762417614" target="_blank" rel="noopener">📱 Download on the App Store</a>
       <a class="btn btn-secondary" href="#features">Learn more</a>
     </div>
   </div>
@@ -1827,7 +1827,7 @@ h1{font-size:38px;font-weight:700;letter-spacing:-1px;margin-bottom:10px}
   <div class="footer-links">
     <a href="/api/privacy-policy">Privacy Policy</a>
     <a href="/api/security-policy">Security Policy</a>
-    <a href="https://apps.apple.com/app/id6753059398" target="_blank" rel="noopener">App Store</a>
+    <a href="https://apps.apple.com/app/id6762417614" target="_blank" rel="noopener">App Store</a>
   </div>
   <div class="contact">
     Support: <a href="mailto:support@propiq.app">support@propiq.app</a> &nbsp;·&nbsp;
