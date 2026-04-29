@@ -1677,11 +1677,11 @@ async def privacy_policy_web():
 <h2>4. Data Storage & Security</h2><p>All data is encrypted in transit (TLS/SSL) and at rest (AES-256). We use session-based authentication, access controls, and regular security audits.</p>
 <h2>5. Third-Party Services</h2><ul><li>Google Sign-In (authentication)</li><li>Google AdMob (advertising)</li><li>OpenStreetMap/Photon (address autocomplete)</li></ul>
 <h2>6. Data Retention</h2><p>Data is retained while your account is active. Upon deletion request, all data is permanently removed within 30 days.</p>
-<h2>7. Your Rights</h2><p>You may access, export (CSV/PDF), correct, or request deletion of your data. Contact: privacy@propiq.app</p>
+<h2>7. Your Rights</h2><p>You may access, export (CSV/PDF), correct, or request deletion of your data. <a href="mailto:propiq.review@gmail.com?subject=Privacy%20Request%20-%20PropIQ%20Track">Contact us about privacy</a>.</p>
 <h2>8. Children's Privacy</h2><p>PropIQ is not intended for individuals under 18.</p>
 <h2>9. Advertising</h2><p>PropIQ uses Google AdMob. You can opt out of personalized ads via device settings. We do not share property/financial data with advertisers.</p>
 <h2>10. Changes</h2><p>We may update this policy. Changes will be posted within the App.</p>
-<h2>11. Contact</h2><p>Privacy: privacy@propiq.app | Data Deletion: delete@propiq.app</p>
+<h2>11. Contact</h2><p><a href="mailto:propiq.review@gmail.com?subject=Privacy%20Inquiry%20-%20PropIQ%20Track">Privacy inquiries</a> &nbsp;·&nbsp; <a href="mailto:propiq.review@gmail.com?subject=Data%20Deletion%20Request%20-%20PropIQ%20Track">Data deletion requests</a></p>
 </body></html>""")
 
 @api_router.get("/security-policy", response_class=HTMLResponse)
@@ -1697,7 +1697,7 @@ async def security_policy_web():
 <h2>5. Application Security</h2><ul><li>Input validation and sanitization</li><li>Protection against SQL injection, XSS, CSRF</li><li>Rate limiting on API endpoints</li><li>Regular dependency vulnerability scanning</li></ul>
 <h2>6. Incident Response</h2><p>Immediate containment, user notification within 72 hours of confirmed breach, root cause analysis, and post-incident review.</p>
 <h2>7. Compliance</h2><ul><li>Australian Privacy Act 1988 & APPs</li><li>OWASP Top 10 guidelines</li><li>App Store & Play Store security requirements</li></ul>
-<h2>8. Contact</h2><p>Report vulnerabilities: security@propiq.app (48-hour response time)</p>
+<h2>8. Contact</h2><p><a href="mailto:propiq.review@gmail.com?subject=Security%20Vulnerability%20Report%20-%20PropIQ%20Track">Report a vulnerability</a> (48-hour response time)</p>
 </body></html>""")
 
 # Include router
