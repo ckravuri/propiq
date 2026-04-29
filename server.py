@@ -1825,10 +1825,7 @@ h1{font-size:38px;font-weight:700;letter-spacing:-1px;margin-bottom:10px}
     <a href="/api/privacy-policy">Privacy Policy</a>
     <a href="/api/security-policy">Security Policy</a>
     <a href="https://apps.apple.com/app/id6762417614" target="_blank" rel="noopener">App Store</a>
-  </div>
-  <div class="contact">
-    Support: <a href="mailto:support@propiq.app">support@propiq.app</a> &nbsp;·&nbsp;
-    Privacy: <a href="mailto:privacy@propiq.app">privacy@propiq.app</a>
+    <a href="mailto:propiq.review@gmail.com?subject=PropIQ%20Track%20Support">Contact Support</a>
   </div>
   <div class="footer-copy" style="margin-top:14px">© 2026 PropIQ Track. All rights reserved.</div>
 </div>
@@ -1891,15 +1888,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
   <div class="card">
     <h2>📧 Contact Us</h2>
     <p>The fastest way to reach us is by email. We aim to respond within 1 business day.</p>
-    <div class="contact-grid">
-      <div class="contact-item">
-        <div class="label">Support</div>
-        <div class="value"><a href="mailto:support@propiq.app">support@propiq.app</a></div>
-      </div>
-      <div class="contact-item">
-        <div class="label">Privacy</div>
-        <div class="value"><a href="mailto:privacy@propiq.app">privacy@propiq.app</a></div>
-      </div>
+    <div style="text-align:center;margin-top:18px">
+      <a href="mailto:propiq.review@gmail.com?subject=PropIQ%20Track%20Support" style="display:inline-flex;align-items:center;gap:8px;padding:14px 28px;border-radius:12px;background:#1C3F35;color:#fff;text-decoration:none;font-weight:600;font-size:15px;border-bottom:none">📨 Email Support</a>
     </div>
   </div>
 
@@ -1925,7 +1915,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     <p>Yes. All data is encrypted in transit (HTTPS) and at rest. You sign in with Apple or Google — we never store passwords.</p>
 
     <h3>I'm having trouble signing in</h3>
-    <p>Make sure you're using the same Apple ID or Google account as before. If issues persist, please email <a href="mailto:support@propiq.app">support@propiq.app</a> with a description of what's happening.</p>
+    <p>Make sure you're using the same Apple ID or Google account as before. If issues persist, please <a href="mailto:propiq.review@gmail.com?subject=Sign-in%20issue">contact support</a> with a description of what's happening.</p>
   </div>
 
   <div class="card">
@@ -1941,7 +1931,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 
 <div class="footer">
   © 2026 PropIQ Track. All rights reserved.<br>
-  Need to <a href="mailto:support@propiq.app">email support</a>? We respond within 1 business day.
+  We respond within 1 business day.
 </div>
 
 </body>
