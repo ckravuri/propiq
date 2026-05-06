@@ -97,6 +97,7 @@ class PropertyCreate(BaseModel):
     purchase_date: str = ""
     loan_amount: float = 0
     interest_rate: float = 0
+    lender: str = ""  # Bank / lender holding the loan (free text). Optional.
     current_estimated_value: float = 0
     property_type: str = "house"
     bedrooms: int = 0
@@ -119,6 +120,7 @@ class PropertyOut(BaseModel):
     purchase_date: str = ""
     loan_amount: float = 0
     interest_rate: float = 0
+    lender: str = ""
     current_estimated_value: float = 0
     property_type: str = "house"
     bedrooms: int = 0
@@ -1874,15 +1876,6 @@ async def security_policy_web():
 
 # Include router
 app.include_router(api_router)
-
-# Serve static marketing/screenshot assets at /assets/* (used to download
-# v1.0.5 highlight screenshots and ZIPs to the user's local machine).
-# Path-traversal-safe: FastAPI's StaticFiles already enforces this.
-import os as _os
-from fastapi.staticfiles import StaticFiles as _StaticFiles
-_assets_dir = _os.path.join(_os.path.dirname(__file__), "public_assets")
-if _os.path.isdir(_assets_dir):
-    app.mount("/assets", _StaticFiles(directory=_assets_dir), name="assets")
 
 
 # Root-level static files served outside /api/ prefix.
