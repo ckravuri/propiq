@@ -81,6 +81,10 @@ class UserOut(BaseModel):
     name: str
     picture: Optional[str] = None
     created_at: Optional[str] = None
+    preferred_currency: str = "AUD"
+
+class UserPreferencesUpdate(BaseModel):
+    preferred_currency: Optional[str] = None
 
 class PropertyCreate(BaseModel):
     property_name: str
@@ -88,6 +92,7 @@ class PropertyCreate(BaseModel):
     suburb: str = ""
     state: str = ""
     postcode: str = ""
+    country: str = "AU"
     purchase_price: float = 0
     purchase_date: str = ""
     loan_amount: float = 0
@@ -109,6 +114,7 @@ class PropertyOut(BaseModel):
     suburb: str = ""
     state: str = ""
     postcode: str = ""
+    country: str = "AU"
     purchase_price: float = 0
     purchase_date: str = ""
     loan_amount: float = 0
@@ -127,6 +133,7 @@ class PropertyOut(BaseModel):
 class IncomeCreate(BaseModel):
     property_id: str
     date: str
+    end_date: Optional[str] = None
     amount: float
     income_type: str = "rent"
     frequency: str = "weekly"
@@ -138,6 +145,7 @@ class IncomeOut(BaseModel):
     property_id: str
     user_id: str
     date: str
+    end_date: Optional[str] = None
     amount: float
     income_type: str = "rent"
     frequency: str = "weekly"
@@ -519,6 +527,28 @@ async def delete_my_account(request: Request):
 @api_router.get("/auth/me")
 async def get_me(request: Request):
     user = await get_current_user(request)
+    # Backfill preferred_currency for legacy users (default AUD).
+    if "preferred_currency" not in user:
+        user["preferred_currency"] = "AUD"
+    return user
+
+
+# Allow logged-in users to update their preferences (currency for now;
+# can grow to language/timezone later).
+@api_router.patch("/users/me")
+async def update_user_preferences(payload: UserPreferencesUpdate, request: Request):
+    user = await get_current_user(request)
+    update_doc = {}
+    if payload.preferred_currency:
+        valid = {"AUD", "USD", "EUR", "GBP", "INR", "CAD", "SGD", "JPY", "NZD", "CHF", "AED", "ZAR"}
+        if payload.preferred_currency not in valid:
+            raise HTTPException(status_code=400, detail="Unsupported currency")
+        update_doc["preferred_currency"] = payload.preferred_currency
+    if not update_doc:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    update_doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": update_doc})
+    user.update(update_doc)
     return user
 
 @api_router.post("/auth/logout")
@@ -698,7 +728,6 @@ async def get_dashboard(request: Request):
     user = await get_current_user(request)
     user_id = user["user_id"]
     now = datetime.now(timezone.utc)
-    year_start = datetime(now.year, 1, 1, tzinfo=timezone.utc).isoformat()
 
     # Run 3 Mongo queries in parallel — saves ~2/3 of the round-trip latency on
     # managed Mongo Atlas where each query has ~200ms ping overhead.
@@ -712,10 +741,95 @@ async def get_dashboard(request: Request):
     total_purchase_value = sum(p.get("purchase_price", 0) for p in properties)
     total_equity = total_market_value - sum(p.get("loan_amount", 0) for p in properties)
 
-    ytd_income = [i for i in all_income if i.get("date", "") >= year_start]
-    ytd_expenses = [e for e in all_expenses if e.get("date", "") >= year_start]
-    
-    # Calculate yearly income using frequency multiplier
+    # Helper: compute the portion of a recurring entry that falls within the YTD
+    # window. Uses the lease/expense start date (entry["date"]) and an optional
+    # end_date to constrain the active period. One-off entries are included only
+    # if dated within the YTD window. This matches the property-detail screen's
+    # "Income YTD"/"Expenses YTD" math so the dashboard totals stay consistent.
+    year_start_date = datetime(now.year, 1, 1, tzinfo=timezone.utc).date()
+    today_date = now.date()
+
+    def _parse_date(s):
+        if not s:
+            return None
+        try:
+            return datetime.fromisoformat(str(s)[:10]).date()
+        except Exception:
+            return None
+
+    def ytd_amount_income(entry):
+        amt = entry.get("amount", 0) or 0
+        freq = (entry.get("frequency") or "weekly").lower()
+        start = _parse_date(entry.get("date")) or year_start_date
+        end = _parse_date(entry.get("end_date"))  # None means ongoing
+        if freq == "one-off" or freq == "":
+            # Treat as one-off — count only if dated this year
+            return amt if start >= year_start_date and start <= today_date else 0
+        # Recurring — clip the active window into the YTD window
+        active_start = max(start, year_start_date)
+        active_end = min(end, today_date) if end else today_date
+        if active_start > active_end:
+            return 0
+        days = (active_end - active_start).days + 1
+        if freq == "weekly":
+            return amt * (days / 7.0)
+        if freq == "fortnightly":
+            return amt * (days / 14.0)
+        if freq == "monthly":
+            return amt * (days / 30.4375)
+        if freq == "quarterly":
+            return amt * (days / 91.3125)
+        if freq == "yearly":
+            return amt * (days / 365.25)
+        return amt  # unknown freq — fall through
+
+    def ytd_amount_expense(entry):
+        amt = entry.get("amount", 0) or 0
+        recurring = bool(entry.get("recurring", False))
+        if not recurring:
+            # One-off expense — count only if dated this year
+            d = _parse_date(entry.get("date"))
+            return amt if d and year_start_date <= d <= today_date else 0
+        freq = (entry.get("frequency") or "monthly").lower()
+        start = _parse_date(entry.get("date")) or year_start_date
+        active_start = max(start, year_start_date)
+        active_end = today_date
+        if active_start > active_end:
+            return 0
+        days = (active_end - active_start).days + 1
+        if freq == "weekly":
+            return amt * (days / 7.0)
+        if freq == "fortnightly":
+            return amt * (days / 14.0)
+        if freq == "monthly":
+            return amt * (days / 30.4375)
+        if freq == "quarterly":
+            return amt * (days / 91.3125)
+        if freq == "yearly":
+            return amt * (days / 365.25)
+        return amt
+
+    # Eligible income/expense entries — i.e., everything except one-offs from
+    # other years. Recurring entries always pass since YTD math handles the
+    # window clipping.
+    def _income_eligible(i):
+        freq = (i.get("frequency") or "weekly").lower()
+        if freq and freq != "one-off":
+            return True
+        d = _parse_date(i.get("date"))
+        return bool(d and year_start_date <= d <= today_date)
+
+    def _expense_eligible(e):
+        if e.get("recurring"):
+            return True
+        d = _parse_date(e.get("date"))
+        return bool(d and year_start_date <= d <= today_date)
+
+    ytd_income = [i for i in all_income if _income_eligible(i)]
+    ytd_expenses = [e for e in all_expenses if _expense_eligible(e)]
+
+    # Legacy annualize helpers kept for any future use (e.g. annual projection
+    # cards). Current totals are computed via the YTD-prorated helpers above.
     def annualize(entry):
         amt = entry.get("amount", 0)
         freq = entry.get("frequency", "weekly")
@@ -730,11 +844,11 @@ async def get_dashboard(request: Request):
         elif freq == "yearly":
             return amt
         return amt  # one-off
-    
+
     def annualize_expense(entry):
         amt = entry.get("amount", 0)
         if not entry.get("recurring", False):
-            return amt  # one-off expense, use as-is
+            return amt
         freq = entry.get("frequency", "monthly")
         if freq == "weekly":
             return amt * 52
@@ -747,22 +861,23 @@ async def get_dashboard(request: Request):
         elif freq == "yearly":
             return amt
         return amt
-    
-    total_yearly_income = sum(annualize(i) for i in ytd_income)
-    total_yearly_expenses = sum(annualize_expense(e) for e in ytd_expenses)
+
+    total_yearly_income = sum(ytd_amount_income(i) for i in ytd_income)
+    total_yearly_expenses = sum(ytd_amount_expense(e) for e in ytd_expenses)
     net_cashflow = total_yearly_income - total_yearly_expenses
     monthly_avg_income = total_yearly_income / max(now.month, 1)
     yearly_roi = (net_cashflow / total_purchase_value * 100) if total_purchase_value > 0 else 0
 
-    # Property-level metrics
+    # Property-level metrics — use the same YTD-prorated helpers so the totals
+    # match what the property detail screen computes client-side.
     property_metrics = []
     for p in properties:
         pid = p["property_id"]
         p_income = [i for i in ytd_income if i["property_id"] == pid]
         p_expenses = [e for e in ytd_expenses if e["property_id"] == pid]
-        p_income_total = sum(annualize(i) for i in p_income)
-        p_expense_total = sum(annualize_expense(e) for e in p_expenses)
-        p_repairs = sum(annualize_expense(e) for e in p_expenses if e.get("category") in ["repairs", "repeated repairs", "maintenance"])
+        p_income_total = sum(ytd_amount_income(i) for i in p_income)
+        p_expense_total = sum(ytd_amount_expense(e) for e in p_expenses)
+        p_repairs = sum(ytd_amount_expense(e) for e in p_expenses if e.get("category") in ["repairs", "repeated repairs", "maintenance"])
         p_net = p_income_total - p_expense_total
         purchase = p.get("purchase_price", 0)
         current = p.get("current_estimated_value", 0)
@@ -832,21 +947,34 @@ async def get_dashboard(request: Request):
 # ==================== REPORTS ====================
 
 @api_router.get("/reports/csv/{property_id}")
-async def generate_csv_report(property_id: str, request: Request, year: int = Query(default=None)):
+async def generate_csv_report(
+    property_id: str,
+    request: Request,
+    year: int = Query(default=None),
+    start_date: Optional[str] = Query(default=None),
+    end_date: Optional[str] = Query(default=None),
+):
     user = await get_current_user(request)
-    if year is None:
-        year = datetime.now(timezone.utc).year
+    # If start/end provided, use those; otherwise fall back to year-based filtering
+    if start_date and end_date:
+        period_start = start_date
+        period_end = end_date
+        period_label = f"{start_date}_to_{end_date}"
+    else:
+        if year is None:
+            year = datetime.now(timezone.utc).year
+        period_start = f"{year}-01-01"
+        period_end = f"{year}-12-31"
+        period_label = str(year)
     prop = await db.properties.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0})
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
-    year_start = f"{year}-01-01"
-    year_end = f"{year}-12-31"
-    income = await db.income_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": year_start, "$lte": year_end}}, {"_id": 0}).to_list(10000)
-    expenses = await db.expense_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": year_start, "$lte": year_end}}, {"_id": 0}).to_list(10000)
+    income = await db.income_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": period_start, "$lte": period_end}}, {"_id": 0}).to_list(10000)
+    expenses = await db.expense_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": period_start, "$lte": period_end}}, {"_id": 0}).to_list(10000)
     
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([f"PropIQ Report - {prop.get('property_name', '')} - {year}"])
+    writer.writerow([f"PropIQ Report - {prop.get('property_name', '')} - {period_start} to {period_end}"])
     writer.writerow([])
     writer.writerow(["Property Summary"])
     writer.writerow(["Field", "Value"])
@@ -878,28 +1006,40 @@ async def generate_csv_report(property_id: str, request: Request, year: int = Qu
     
     csv_content = output.getvalue()
     csv_b64 = base64.b64encode(csv_content.encode('utf-8')).decode('ascii')
-    # Sanitize filename - remove special chars
     safe_name = re.sub(r'[^\w\s-]', '', prop.get('property_name', 'report')).strip().replace(' ', '_')
-    return {"filename": f"PropIQ_Track_{safe_name}_{year}.csv", "content_base64": csv_b64, "content_type": "text/csv"}
+    return {"filename": f"PropIQ_Track_{safe_name}_{period_label}.csv", "content_base64": csv_b64, "content_type": "text/csv"}
 
 
 @api_router.get("/reports/csv-download/{property_id}")
-async def download_csv_report(property_id: str, request: Request, year: int = Query(default=None)):
-    """Returns raw CSV file as a direct download"""
+async def download_csv_report(
+    property_id: str,
+    request: Request,
+    year: int = Query(default=None),
+    start_date: Optional[str] = Query(default=None),
+    end_date: Optional[str] = Query(default=None),
+):
+    """Returns raw CSV file as a direct download. Pass start_date+end_date for
+    a custom date range, or year for a calendar year, or neither for current year."""
     user = await get_current_user(request)
-    if year is None:
-        year = datetime.now(timezone.utc).year
+    if start_date and end_date:
+        period_start = start_date
+        period_end = end_date
+        period_label = f"{start_date}_to_{end_date}"
+    else:
+        if year is None:
+            year = datetime.now(timezone.utc).year
+        period_start = f"{year}-01-01"
+        period_end = f"{year}-12-31"
+        period_label = str(year)
     prop = await db.properties.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0})
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
-    year_start = f"{year}-01-01"
-    year_end = f"{year}-12-31"
-    income = await db.income_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": year_start, "$lte": year_end}}, {"_id": 0}).to_list(10000)
-    expenses = await db.expense_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": year_start, "$lte": year_end}}, {"_id": 0}).to_list(10000)
+    income = await db.income_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": period_start, "$lte": period_end}}, {"_id": 0}).to_list(10000)
+    expenses = await db.expense_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": period_start, "$lte": period_end}}, {"_id": 0}).to_list(10000)
     
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([f"PropIQ Report - {prop.get('property_name', '')} - {year}"])
+    writer.writerow([f"PropIQ Report - {prop.get('property_name', '')} - {period_start} to {period_end}"])
     writer.writerow([])
     writer.writerow(["Property Summary"])
     writer.writerow(["Field", "Value"])
@@ -928,7 +1068,7 @@ async def download_csv_report(property_id: str, request: Request, year: int = Qu
     
     csv_content = output.getvalue()
     safe_name = re.sub(r'[^\w\s-]', '', prop.get('property_name', 'report')).strip().replace(' ', '_')
-    filename = f"PropIQ_Track_{safe_name}_{year}.csv"
+    filename = f"PropIQ_Track_{safe_name}_{period_label}.csv"
     
     return StreamingResponse(
         iter([csv_content]),
@@ -937,17 +1077,29 @@ async def download_csv_report(property_id: str, request: Request, year: int = Qu
     )
 
 @api_router.get("/reports/summary/{property_id}")
-async def get_report_summary(property_id: str, request: Request, year: int = Query(default=None)):
+async def get_report_summary(
+    property_id: str,
+    request: Request,
+    year: int = Query(default=None),
+    start_date: Optional[str] = Query(default=None),
+    end_date: Optional[str] = Query(default=None),
+):
     user = await get_current_user(request)
-    if year is None:
-        year = datetime.now(timezone.utc).year
+    if start_date and end_date:
+        period_start = start_date
+        period_end = end_date
+        report_year = start_date[:4]
+    else:
+        if year is None:
+            year = datetime.now(timezone.utc).year
+        period_start = f"{year}-01-01"
+        period_end = f"{year}-12-31"
+        report_year = year
     prop = await db.properties.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0})
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
-    year_start = f"{year}-01-01"
-    year_end = f"{year}-12-31"
-    income = await db.income_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": year_start, "$lte": year_end}}, {"_id": 0}).to_list(10000)
-    expenses = await db.expense_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": year_start, "$lte": year_end}}, {"_id": 0}).to_list(10000)
+    income = await db.income_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": period_start, "$lte": period_end}}, {"_id": 0}).to_list(10000)
+    expenses = await db.expense_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": period_start, "$lte": period_end}}, {"_id": 0}).to_list(10000)
     
     total_income = sum(i.get("amount", 0) for i in income)
     total_expenses = sum(e.get("amount", 0) for e in expenses)
@@ -963,7 +1115,9 @@ async def get_report_summary(property_id: str, request: Request, year: int = Que
     
     return {
         "property": prop,
-        "year": year,
+        "year": report_year,
+        "start_date": period_start,
+        "end_date": period_end,
         "total_income": total_income,
         "total_expenses": total_expenses,
         "net_profit_loss": total_income - total_expenses,
@@ -1320,9 +1474,14 @@ async def lookup_property_details(
 # ==================== ADDRESS SEARCH ====================
 
 @api_router.get("/address/search")
-async def search_address(q: str = Query(..., min_length=3)):
-    """Australian address autocomplete using multiple sources for accuracy"""
+async def search_address(q: str = Query(..., min_length=3), country: str = Query(default="AU")):
+    """Address autocomplete. Pass country=AU (default) for AU-biased search; pass
+    country=GLOBAL (or any other ISO-2 code) to search worldwide. Combines Photon
+    (Komoot) and Nominatim — both free OpenStreetMap-based geocoders, no key."""
     results = []
+    is_au = (country or "AU").upper() == "AU"
+    is_global = (country or "").upper() == "GLOBAL"
+    iso2 = (country or "AU").upper()
     
     # Extract house number from query if user typed one (e.g. "13 ainsworth street mawson")
     user_house_number = ""
@@ -1332,16 +1491,20 @@ async def search_address(q: str = Query(..., min_length=3)):
     
     # Source 1: Photon (Komoot) - better autocomplete behavior
     try:
+        photon_params = {
+            "q": q,
+            "limit": 6,
+            "lang": "en",
+        }
+        if is_au:
+            # Bias toward Australia center for AU users
+            photon_params["lat"] = -25.2744
+            photon_params["lon"] = 133.7751
+        # Photon doesn't support strict country filtering; we filter the response.
         async with httpx.AsyncClient() as http_client:
             resp = await http_client.get(
                 "https://photon.komoot.io/api/",
-                params={
-                    "q": q,
-                    "limit": 6,
-                    "lang": "en",
-                    "lat": -25.2744,  # Australia center bias
-                    "lon": 133.7751,
-                },
+                params=photon_params,
                 headers={"User-Agent": "PropIQ/1.0"},
                 timeout=4.0,
             )
@@ -1349,18 +1512,19 @@ async def search_address(q: str = Query(..., min_length=3)):
             data = resp.json()
             for f in data.get("features", []):
                 props = f.get("properties", {})
-                country = props.get("country", "")
-                if country and "Australia" not in country:
-                    continue  # Skip non-Australian results
+                feat_country = props.get("country", "")
+                feat_country_code = (props.get("countrycode") or "").upper()
+                if is_au and feat_country and "Australia" not in feat_country:
+                    continue
+                if not is_au and not is_global and iso2 and feat_country_code and feat_country_code != iso2:
+                    continue
                 
                 house_number = props.get("housenumber", "")
                 street_name = props.get("street", props.get("name", ""))
                 
-                # If Photon didn't return a house number but user typed one, use user's number
                 if not house_number and user_house_number and street_name:
                     house_number = user_house_number
                 
-                # In Australian data: district = suburb, city = sub-locality
                 district = props.get("district", "")
                 city = props.get("city", props.get("locality", ""))
                 suburb = district if district else city
@@ -1390,17 +1554,21 @@ async def search_address(q: str = Query(..., min_length=3)):
     # Source 2: Nominatim (OpenStreetMap) - more structured results
     if len(results) < 4:
         try:
+            nom_params = {
+                "q": q,
+                "format": "json",
+                "addressdetails": 1,
+                "limit": 5,
+                "dedupe": 1,
+            }
+            if is_au:
+                nom_params["countrycodes"] = "au"
+            elif not is_global and iso2 and len(iso2) == 2:
+                nom_params["countrycodes"] = iso2.lower()
             async with httpx.AsyncClient() as http_client:
                 resp = await http_client.get(
                     "https://nominatim.openstreetmap.org/search",
-                    params={
-                        "q": q,
-                        "format": "json",
-                        "addressdetails": 1,
-                        "countrycodes": "au",
-                        "limit": 5,
-                        "dedupe": 1,
-                    },
+                    params=nom_params,
                     headers={"User-Agent": "PropIQ/1.0"},
                     timeout=4.0,
                 )
@@ -1680,8 +1848,12 @@ async def privacy_policy_web():
 <h2>7. Your Rights</h2><p>You may access, export (CSV/PDF), correct, or request deletion of your data. <a href="mailto:propiq.review@gmail.com?subject=Privacy%20Request%20-%20PropIQ%20Track">Contact us about privacy</a>.</p>
 <h2>8. Children's Privacy</h2><p>PropIQ is not intended for individuals under 18.</p>
 <h2>9. Advertising</h2><p>PropIQ uses Google AdMob. You can opt out of personalized ads via device settings. We do not share property/financial data with advertisers.</p>
-<h2>10. Changes</h2><p>We may update this policy. Changes will be posted within the App.</p>
-<h2>11. Contact</h2><p><a href="mailto:propiq.review@gmail.com?subject=Privacy%20Inquiry%20-%20PropIQ%20Track">Privacy inquiries</a> &nbsp;·&nbsp; <a href="mailto:propiq.review@gmail.com?subject=Data%20Deletion%20Request%20-%20PropIQ%20Track">Data deletion requests</a></p>
+<h2>10. International Users — GDPR & CCPA</h2>
+<p><strong>European Union (GDPR):</strong> If you are in the EU/EEA, you have the right to access, rectify, port, or delete your personal data, restrict or object to processing, and lodge a complaint with your local data protection authority. We process your data based on your consent and the necessity of providing the service. You can withdraw consent at any time by deleting your account from Settings.</p>
+<p><strong>California (CCPA/CPRA):</strong> California residents have the right to know what personal information we collect, request deletion of their data, opt out of any "sale" of personal information (PropIQ does not sell personal information), and not be discriminated against for exercising these rights. Submit requests via the contact link below.</p>
+<p><strong>Other regions:</strong> Where local laws grant similar privacy rights (e.g. Brazil's LGPD, UK GDPR, Canada's PIPEDA), we honor equivalent protections. The data controller is PropIQ Track. Reach out for any privacy inquiry.</p>
+<h2>11. Changes</h2><p>We may update this policy. Changes will be posted within the App.</p>
+<h2>12. Contact</h2><p><a href="mailto:propiq.review@gmail.com?subject=Privacy%20Inquiry%20-%20PropIQ%20Track">Privacy inquiries</a> &nbsp;·&nbsp; <a href="mailto:propiq.review@gmail.com?subject=Data%20Deletion%20Request%20-%20PropIQ%20Track">Data deletion requests</a></p>
 </body></html>""")
 
 @api_router.get("/security-policy", response_class=HTMLResponse)
