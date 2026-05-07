@@ -978,33 +978,48 @@ async def generate_csv_report(
     
     output = io.StringIO()
     writer = csv.writer(output)
+
+    # Currency code derived from the property's country (AU→AUD, US→USD,
+    # GB→GBP, IN→INR, …). Stamped into headers + every "Amount" column header
+    # so a UK report reads "Amount (GBP)" instead of the generic "Amount".
+    _country_to_ccy = {
+        "AU": "AUD", "NZ": "NZD", "SG": "SGD", "JP": "JPY", "IN": "INR",
+        "US": "USD", "CA": "CAD", "GB": "GBP",
+        "DE": "EUR", "FR": "EUR", "ES": "EUR", "IT": "EUR", "NL": "EUR", "IE": "EUR",
+        "PT": "EUR", "BE": "EUR", "AT": "EUR", "GR": "EUR", "FI": "EUR",
+        "CH": "CHF", "AE": "AED", "ZA": "ZAR",
+    }
+    ccy = _country_to_ccy.get((prop.get("country") or "AU").upper(), "AUD")
     writer.writerow([f"PropIQ Report - {prop.get('property_name', '')} - {period_start} to {period_end}"])
+    writer.writerow([f"Currency: {ccy}"])
     writer.writerow([])
     writer.writerow(["Property Summary"])
     writer.writerow(["Field", "Value"])
     writer.writerow(["Name", prop.get("property_name", "")])
     writer.writerow(["Address", f"{prop.get('address', '')} {prop.get('suburb', '')} {prop.get('state', '')} {prop.get('postcode', '')}"])
-    writer.writerow(["Purchase Price", prop.get("purchase_price", 0)])
-    writer.writerow(["Current Value", prop.get("current_estimated_value", 0)])
-    writer.writerow(["Loan Amount", prop.get("loan_amount", 0)])
+    writer.writerow(["Country", prop.get("country", "AU")])
+    writer.writerow(["Lender", prop.get("lender", "")])
+    writer.writerow([f"Purchase Price ({ccy})", prop.get("purchase_price", 0)])
+    writer.writerow([f"Current Value ({ccy})", prop.get("current_estimated_value", 0)])
+    writer.writerow([f"Loan Amount ({ccy})", prop.get("loan_amount", 0)])
     writer.writerow([])
     
     total_income = sum(i.get("amount", 0) for i in income)
     total_expenses = sum(e.get("amount", 0) for e in expenses)
     writer.writerow(["Financial Summary"])
-    writer.writerow(["Total Income", total_income])
-    writer.writerow(["Total Expenses", total_expenses])
-    writer.writerow(["Net Profit/Loss", total_income - total_expenses])
+    writer.writerow([f"Total Income ({ccy})", total_income])
+    writer.writerow([f"Total Expenses ({ccy})", total_expenses])
+    writer.writerow([f"Net Profit/Loss ({ccy})", total_income - total_expenses])
     writer.writerow([])
     
     writer.writerow(["Income Entries"])
-    writer.writerow(["Date", "Amount", "Type", "Tenant", "Notes"])
+    writer.writerow(["Date", f"Amount ({ccy})", "Type", "Tenant", "Notes"])
     for i in income:
         writer.writerow([i.get("date", ""), i.get("amount", 0), i.get("income_type", ""), i.get("tenant_name", ""), i.get("notes", "")])
     writer.writerow([])
     
     writer.writerow(["Expense Entries"])
-    writer.writerow(["Date", "Amount", "Category", "Recurring", "Notes"])
+    writer.writerow(["Date", f"Amount ({ccy})", "Category", "Recurring", "Notes"])
     for e in expenses:
         writer.writerow([e.get("date", ""), e.get("amount", 0), e.get("category", ""), e.get("recurring", False), e.get("notes", "")])
     
