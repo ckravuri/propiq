@@ -104,6 +104,7 @@ class PropertyCreate(BaseModel):
     bathrooms: int = 0
     parking: int = 0
     land_size: float = 0
+    land_size_unit: str = "m2"  # 'm2'|'ft2'|'ac'|'ha'|'yd2' — default m²
     notes: str = ""
     image_base64: Optional[str] = None
 
@@ -127,6 +128,7 @@ class PropertyOut(BaseModel):
     bathrooms: int = 0
     parking: int = 0
     land_size: float = 0
+    land_size_unit: str = "m2"
     notes: str = ""
     image_base64: Optional[str] = None
     created_date: str = ""
