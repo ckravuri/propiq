@@ -38,6 +38,12 @@ python-multipart==0.0.24
 certifi==2026.2.25
 
 # Emergent LLM integration (hosted on Emergent's public CloudFront pypi index).
-# Requires EMERGENT_LLM_KEY env var to be set on Railway for AI Insights to work.
+# Kept as a fallback path inside /api/ai/insights — only used if GEMINI_API_KEY is unset
+# or Gemini fails. Safe to leave EMERGENT_LLM_KEY unset on Railway once Gemini is live.
 --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
 emergentintegrations==0.1.0
+
+# Google Gemini (PRIMARY AI provider as of v1.0.11).
+# Free tier: gemini-2.5-flash, 1500 req/day, 1M tokens/day, 15 RPM. No credit card.
+# Set GEMINI_API_KEY env var on Railway. Get key at https://aistudio.google.com/app/apikey
+google-genai==1.71.0

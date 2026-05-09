@@ -35,6 +35,17 @@ client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
 db = client[db_name]
 
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
+
+# Lazy import — keeps backend booting cleanly even if google-genai is missing or key is unset.
+try:
+    from gemini_helper import generate_text as gemini_generate_text, is_available as gemini_is_available
+except Exception as _gemini_import_err:
+    logger.warning(f"[INIT] Gemini helper import failed: {_gemini_import_err}")
+    async def gemini_generate_text(prompt: str, system_instruction: str = None, timeout_seconds: float = 25.0):
+        return None
+    def gemini_is_available() -> bool:
+        return False
 
 # Google OAuth — accepted audiences for native Google Sign-In ID tokens.
 # The web client ID is shared by iOS and Android native flows when `webClientId` is configured in
@@ -1280,21 +1291,44 @@ Provide:
 Keep it concise and actionable. Format with bullet points."""
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        
-        if model == "gemini-3-flash":
-            chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"insights_{property_id}_{uuid.uuid4().hex[:6]}", system_message="You are a professional property investment analyst.")
-            chat.with_model("gemini", "gemini-3-flash-preview")
-        else:
-            chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"insights_{property_id}_{uuid.uuid4().hex[:6]}", system_message="You are a professional property investment analyst.")
+        # Try Google Gemini first (free tier — primary path).
+        if gemini_is_available():
+            insights = await gemini_generate_text(
+                prompt=prompt_text,
+                system_instruction="You are a professional property investment analyst. Provide concise, actionable insights formatted with bullet points.",
+                timeout_seconds=25.0,
+            )
+            if insights:
+                return {"insights": insights, "model": "gemini-2.5-flash"}
+            logger.warning("[AI Insights] Gemini returned empty/failed — falling back to Emergent if available.")
+
+        # Fallback: Emergent LLM Key (kept as safety net during transition).
+        if EMERGENT_LLM_KEY:
+            from emergentintegrations.llm.chat import LlmChat, UserMessage
+            chat = LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"insights_{property_id}_{uuid.uuid4().hex[:6]}",
+                system_message="You are a professional property investment analyst.",
+            )
             chat.with_model("openai", "gpt-5.2")
-        
-        user_message = UserMessage(text=prompt_text)
-        response = await chat.send_message(user_message)
-        return {"insights": response, "model": model}
+            user_message = UserMessage(text=prompt_text)
+            response = await chat.send_message(user_message)
+            return {"insights": response, "model": "gpt-5.2"}
+
+        # Both providers unavailable → graceful "try again later" message.
+        return {
+            "insights": "AI Insights are temporarily unavailable. Please try again later.",
+            "model": "unavailable",
+            "unavailable": True,
+        }
     except Exception as e:
-        logger.error(f"AI insights error: {e}")
-        raise HTTPException(status_code=500, detail=f"AI service error: {str(e)}")
+        logger.error(f"AI insights error: {type(e).__name__}: {e}")
+        # Never crash the client — return a friendly message instead of 500.
+        return {
+            "insights": "AI Insights are temporarily unavailable. Please try again later.",
+            "model": "unavailable",
+            "unavailable": True,
+        }
 
 # ==================== PROPERTY LOOKUP (Domain.com.au + AI Fallback) ====================
 
@@ -1413,12 +1447,9 @@ async def _search_property_details(street: str, suburb: str, state: str, postcod
         return result
     
     # Step 3: If regex extraction failed, use AI to parse the snippets
-    if EMERGENT_LLM_KEY:
-        try:
-            from emergentintegrations.llm.chat import LlmChat, UserMessage
-            import json as json_module
-            
-            prompt = f"""Extract the property details from these search results about {full_addr}:
+    # Try Gemini first, fall back to Emergent.
+    ai_response_text = None
+    extraction_prompt = f"""Extract the property details from these search results about {full_addr}:
 
 {snippets_text}
 
@@ -1427,23 +1458,41 @@ Return ONLY a JSON object with the ACTUAL data found (not estimates):
 
 If the data is not in the search results, return: {{"error": "not_found"}}"""
 
+    if gemini_is_available():
+        try:
+            ai_response_text = await gemini_generate_text(
+                prompt=extraction_prompt,
+                system_instruction="Extract structured property data from search result snippets. Return JSON only.",
+                timeout_seconds=15.0,
+            )
+        except Exception as e:
+            logger.warning(f"AI extraction (gemini) error: {type(e).__name__}")
+
+    if ai_response_text is None and EMERGENT_LLM_KEY:
+        try:
+            from emergentintegrations.llm.chat import LlmChat, UserMessage
             chat = LlmChat(
                 api_key=EMERGENT_LLM_KEY,
                 session_id=f"prop_extract_{uuid.uuid4().hex[:8]}",
                 system_message="Extract structured property data from search result snippets. Return JSON only."
             )
             chat.with_model("openai", "gpt-5.2")
-            response = await chat.send_message(UserMessage(text=prompt))
-            
-            response_text = response.strip()
+            ai_response_text = await chat.send_message(UserMessage(text=extraction_prompt))
+        except Exception as e:
+            logger.warning(f"AI extraction (emergent) error: {type(e).__name__}")
+
+    if ai_response_text:
+        try:
+            import json as json_module
+            response_text = ai_response_text.strip()
             if response_text.startswith("```"):
                 response_text = re.sub(r'^```(?:json)?\s*', '', response_text)
                 response_text = re.sub(r'\s*```$', '', response_text)
-            
+
             data = json_module.loads(response_text)
             if data.get("error") == "not_found":
                 return None
-            
+
             return {
                 "bedrooms": int(data.get("bedrooms", 0)),
                 "bathrooms": int(data.get("bathrooms", 0)),
@@ -1453,8 +1502,8 @@ If the data is not in the search results, return: {{"error": "not_found"}}"""
                 "source": "property_data",
             }
         except Exception as e:
-            logger.warning(f"AI extraction error: {type(e).__name__}")
-    
+            logger.warning(f"AI extraction JSON parse error: {type(e).__name__}")
+
     return None
 
 
