@@ -10,7 +10,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 import httpx
 import io
 import csv
@@ -97,6 +97,19 @@ class UserOut(BaseModel):
 class UserPreferencesUpdate(BaseModel):
     preferred_currency: Optional[str] = None
 
+class LoanPeriod(BaseModel):
+    """A single loan period within a property's loan_history."""
+    loan_id: Optional[str] = None
+    start_date: str
+    end_date: Optional[str] = None
+    lender: str = ""
+    initial_balance: float = 0
+    interest_rate: float = 0  # annual %, e.g. 5.2
+    loan_term_years: int = 30
+    repayment_type: str = "P&I"  # "P&I" | "Interest-Only"
+    repayment_frequency: str = "monthly"
+    interest_only_until: Optional[str] = None  # for P&I that has an IO sub-period
+
 class PropertyCreate(BaseModel):
     property_name: str
     address: str = ""
@@ -118,6 +131,9 @@ class PropertyCreate(BaseModel):
     land_size_unit: str = "m2"  # 'm2'|'ft2'|'ac'|'ha'|'yd2' — default m²
     notes: str = ""
     image_base64: Optional[str] = None
+    # v1.1.0 new fields
+    agent_fee_percentage: Optional[float] = None  # e.g. 7.5 means 7.5% of rental income
+    loan_history: Optional[List[LoanPeriod]] = None  # full loan/refinance history
 
 class PropertyOut(BaseModel):
     property_id: str
@@ -144,6 +160,9 @@ class PropertyOut(BaseModel):
     image_base64: Optional[str] = None
     created_date: str = ""
     updated_date: str = ""
+    # v1.1.0 new fields
+    agent_fee_percentage: Optional[float] = None
+    loan_history: Optional[List[LoanPeriod]] = None
 
 class IncomeCreate(BaseModel):
     property_id: str
@@ -154,6 +173,11 @@ class IncomeCreate(BaseModel):
     frequency: str = "weekly"
     tenant_name: str = ""
     notes: str = ""
+    # v1.1.0 — optional per-entry agent fee % override. If None, falls back to property setting.
+    agent_fee_percentage: Optional[float] = None
+    # If true, app auto-creates a linked agent-fee expense entry. Defaults to True
+    # whenever an agent_fee_percentage > 0 is resolved (property or entry level).
+    auto_agent_fee: bool = True
 
 class IncomeOut(BaseModel):
     income_id: str
@@ -167,22 +191,43 @@ class IncomeOut(BaseModel):
     tenant_name: str = ""
     notes: str = ""
     created_date: str = ""
+    agent_fee_percentage: Optional[float] = None
+    auto_agent_fee: bool = True
+
+class IncomeUpdate(BaseModel):
+    """Partial update payload for editing an income entry."""
+    date: Optional[str] = None
+    end_date: Optional[str] = None
+    amount: Optional[float] = None
+    income_type: Optional[str] = None
+    frequency: Optional[str] = None
+    tenant_name: Optional[str] = None
+    notes: Optional[str] = None
+    agent_fee_percentage: Optional[float] = None
+    auto_agent_fee: Optional[bool] = None
 
 class ExpenseCreate(BaseModel):
     property_id: str
     date: str
+    end_date: Optional[str] = None  # v1.1.0 — end date for recurring expenses
     amount: float
     category: str = "miscellaneous"
     notes: str = ""
     recurring: bool = False
     frequency: str = "monthly"
     receipt_base64: Optional[str] = None
+    # v1.1.0 — mortgage-specific metadata (only set when category=="mortgage" and user used calculator)
+    mortgage_interest: Optional[float] = None  # interest portion of this payment (deductible)
+    mortgage_principal: Optional[float] = None  # principal portion of this payment
+    mortgage_balance_after: Optional[float] = None  # remaining loan balance after payment
+    mortgage_loan_id: Optional[str] = None  # which loan_history period this came from
 
 class ExpenseOut(BaseModel):
     expense_id: str
     property_id: str
     user_id: str
     date: str
+    end_date: Optional[str] = None
     amount: float
     category: str = "miscellaneous"
     notes: str = ""
@@ -190,6 +235,29 @@ class ExpenseOut(BaseModel):
     frequency: str = "monthly"
     receipt_base64: Optional[str] = None
     created_date: str = ""
+    # v1.1.0 — auto-linkage fields
+    linked_income_id: Optional[str] = None  # if this expense was auto-created from income
+    auto_calculated: bool = False  # true if app generated this (agent fees etc.)
+    # v1.1.0 — mortgage metadata
+    mortgage_interest: Optional[float] = None
+    mortgage_principal: Optional[float] = None
+    mortgage_balance_after: Optional[float] = None
+    mortgage_loan_id: Optional[str] = None
+
+class ExpenseUpdate(BaseModel):
+    """Partial update payload for editing an expense entry."""
+    date: Optional[str] = None
+    end_date: Optional[str] = None
+    amount: Optional[float] = None
+    category: Optional[str] = None
+    notes: Optional[str] = None
+    recurring: Optional[bool] = None
+    frequency: Optional[str] = None
+    receipt_base64: Optional[str] = None
+    mortgage_interest: Optional[float] = None
+    mortgage_principal: Optional[float] = None
+    mortgage_balance_after: Optional[float] = None
+    mortgage_loan_id: Optional[str] = None
 
 class ReminderCreate(BaseModel):
     property_id: str
@@ -580,11 +648,104 @@ async def logout(request: Request, response: Response):
 
 # ==================== PROPERTY ROUTES ====================
 
+# -- v1.1.0 helpers: loan_history migration + agent_fee + auto-linked agent expense
+
+import mortgage_calc  # local module — amortization engine + migration helper
+
+def _ensure_loan_history(prop: dict) -> dict:
+    """
+    Ensure prop['loan_history'] exists. If the property was created before v1.1.0 and
+    only has legacy fields (loan_amount, interest_rate, lender), synthesize a single
+    active loan period from them. Returns the (possibly mutated) prop dict.
+
+    Note: this is a READ-time migration. We don't persist the synthesized history
+    back to Mongo unless the caller explicitly does so — keeps reads safe.
+    """
+    if not prop:
+        return prop
+    lh = prop.get("loan_history")
+    if isinstance(lh, list) and len(lh) > 0:
+        return prop
+    synthesized = mortgage_calc.synthesize_loan_history_from_legacy(prop)
+    if synthesized:
+        prop["loan_history"] = synthesized
+    return prop
+
+
+async def _delete_linked_agent_fee_expense(income_id: str, user_id: str):
+    """Delete the auto-created agent fee expense linked to a given income entry."""
+    await db.expense_entries.delete_many({
+        "linked_income_id": income_id,
+        "user_id": user_id,
+        "auto_calculated": True,
+    })
+
+
+async def _upsert_linked_agent_fee_expense(income_doc: dict, prop: dict):
+    """
+    Create or update the agent-fee expense entry linked to an income entry.
+
+    The agent fee % is resolved with this priority:
+      1. income.agent_fee_percentage (per-entry override)
+      2. property.agent_fee_percentage (default for the property)
+
+    If the resolved % is None / 0, OR income.auto_agent_fee is False, any existing
+    linked expense is deleted.
+    """
+    income_id = income_doc.get("income_id")
+    user_id = income_doc.get("user_id")
+    if not income_id or not user_id:
+        return
+
+    auto_flag = income_doc.get("auto_agent_fee", True)
+    pct = income_doc.get("agent_fee_percentage")
+    if pct is None:
+        pct = (prop or {}).get("agent_fee_percentage")
+
+    if not auto_flag or not pct or pct <= 0:
+        # No agent fee desired — remove any existing link
+        await _delete_linked_agent_fee_expense(income_id, user_id)
+        return
+
+    fee_amount = float(income_doc.get("amount", 0) or 0) * float(pct) / 100.0
+    if fee_amount <= 0:
+        await _delete_linked_agent_fee_expense(income_id, user_id)
+        return
+
+    existing = await db.expense_entries.find_one({
+        "linked_income_id": income_id,
+        "user_id": user_id,
+        "auto_calculated": True,
+    })
+    payload = {
+        "property_id": income_doc.get("property_id"),
+        "user_id": user_id,
+        "date": income_doc.get("date"),
+        "end_date": income_doc.get("end_date"),
+        "amount": round(fee_amount, 2),
+        "category": "agent_fees",
+        "notes": f"Auto-calculated agent fee ({pct}% of rental income)",
+        "recurring": bool(income_doc.get("frequency") and income_doc.get("frequency") != "one-off"),
+        "frequency": income_doc.get("frequency", "monthly"),
+        "linked_income_id": income_id,
+        "auto_calculated": True,
+    }
+    if existing:
+        await db.expense_entries.update_one(
+            {"expense_id": existing["expense_id"]},
+            {"$set": payload},
+        )
+    else:
+        payload["expense_id"] = f"exp_{uuid.uuid4().hex[:12]}"
+        payload["created_date"] = datetime.now(timezone.utc).isoformat()
+        await db.expense_entries.insert_one(payload)
+
+
 @api_router.get("/properties", response_model=List[PropertyOut])
 async def list_properties(request: Request):
     user = await get_current_user(request)
     props = await db.properties.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_date", -1).to_list(1000)
-    return props
+    return [_ensure_loan_history(p) for p in props]
 
 @api_router.get("/properties/{property_id}", response_model=PropertyOut)
 async def get_property(property_id: str, request: Request):
@@ -592,7 +753,7 @@ async def get_property(property_id: str, request: Request):
     prop = await db.properties.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0})
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
-    return prop
+    return _ensure_loan_history(prop)
 
 @api_router.post("/properties", response_model=PropertyOut)
 async def create_property(prop: PropertyCreate, request: Request):
@@ -603,9 +764,17 @@ async def create_property(prop: PropertyCreate, request: Request):
     prop_dict["user_id"] = user["user_id"]
     prop_dict["created_date"] = now
     prop_dict["updated_date"] = now
+    # If loan_history not provided but legacy loan_amount present, synthesize one period
+    if not prop_dict.get("loan_history") and (prop_dict.get("loan_amount") or 0) > 0:
+        prop_dict["loan_history"] = mortgage_calc.synthesize_loan_history_from_legacy(prop_dict)
+    # Assign loan_id to any history entries missing one
+    if prop_dict.get("loan_history"):
+        for lp in prop_dict["loan_history"]:
+            if not lp.get("loan_id"):
+                lp["loan_id"] = f"loan_{uuid.uuid4().hex[:10]}"
     await db.properties.insert_one(prop_dict)
     result = await db.properties.find_one({"property_id": prop_dict["property_id"]}, {"_id": 0})
-    return result
+    return _ensure_loan_history(result)
 
 @api_router.put("/properties/{property_id}", response_model=PropertyOut)
 async def update_property(property_id: str, prop: PropertyCreate, request: Request):
@@ -615,9 +784,162 @@ async def update_property(property_id: str, prop: PropertyCreate, request: Reque
         raise HTTPException(status_code=404, detail="Property not found")
     update_data = prop.dict()
     update_data["updated_date"] = datetime.now(timezone.utc).isoformat()
+    # Preserve existing loan_history if the caller didn't send one (Edit Property in the
+    # frontend doesn't manage loan_history — that has its own dedicated screen/endpoints).
+    if update_data.get("loan_history") is None and existing.get("loan_history"):
+        update_data["loan_history"] = existing["loan_history"]
+    # Assign loan_id to any new history entries missing one
+    if update_data.get("loan_history"):
+        for lp in update_data["loan_history"]:
+            if not lp.get("loan_id"):
+                lp["loan_id"] = f"loan_{uuid.uuid4().hex[:10]}"
     await db.properties.update_one({"property_id": property_id}, {"$set": update_data})
     result = await db.properties.find_one({"property_id": property_id}, {"_id": 0})
-    return result
+    # If user's property-level agent_fee_percentage changed, refresh any linked
+    # auto-agent-fee expenses so amounts re-sync against the new %.
+    old_pct = existing.get("agent_fee_percentage")
+    new_pct = result.get("agent_fee_percentage")
+    if (old_pct or 0) != (new_pct or 0):
+        incomes = await db.income_entries.find({
+            "property_id": property_id,
+            "user_id": user["user_id"],
+            "auto_agent_fee": {"$ne": False},
+        }, {"_id": 0}).to_list(10000)
+        for inc in incomes:
+            await _upsert_linked_agent_fee_expense(inc, result)
+    return _ensure_loan_history(result)
+
+
+# -- v1.1.0 Loan history CRUD ----------------------------------------------
+
+@api_router.post("/properties/{property_id}/loan-history")
+async def add_loan_period(property_id: str, period: LoanPeriod, request: Request):
+    """Add a new loan period (refinance / rate change). Auto end-dates the previous active period."""
+    user = await get_current_user(request)
+    prop = await db.properties.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    _ensure_loan_history(prop)
+    history = list(prop.get("loan_history") or [])
+
+    new_entry = period.dict()
+    new_entry["loan_id"] = new_entry.get("loan_id") or f"loan_{uuid.uuid4().hex[:10]}"
+
+    # Auto end-date the previous active period (no end_date set) the day before new one starts
+    new_start = new_entry.get("start_date")
+    if new_start:
+        try:
+            new_start_d = datetime.fromisoformat(new_start[:10]).date()
+            day_before = (new_start_d - timedelta(days=1)).isoformat()
+            for lp in history:
+                if not lp.get("end_date"):
+                    lp["end_date"] = day_before
+        except Exception:
+            pass
+
+    history.append(new_entry)
+    await db.properties.update_one(
+        {"property_id": property_id},
+        {"$set": {"loan_history": history, "updated_date": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"loan_history": history}
+
+
+@api_router.patch("/properties/{property_id}/loan-history/{loan_id}")
+async def update_loan_period(property_id: str, loan_id: str, request: Request):
+    """Update a specific loan period. Body = partial loan period dict."""
+    user = await get_current_user(request)
+    prop = await db.properties.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    body = await request.json()
+    history = list(prop.get("loan_history") or [])
+    found = False
+    for i, lp in enumerate(history):
+        if lp.get("loan_id") == loan_id:
+            history[i] = {**lp, **{k: v for k, v in body.items() if k != "loan_id"}}
+            found = True
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="Loan period not found")
+    await db.properties.update_one(
+        {"property_id": property_id},
+        {"$set": {"loan_history": history, "updated_date": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"loan_history": history}
+
+
+@api_router.delete("/properties/{property_id}/loan-history/{loan_id}")
+async def delete_loan_period(property_id: str, loan_id: str, request: Request):
+    user = await get_current_user(request)
+    prop = await db.properties.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    history = [lp for lp in (prop.get("loan_history") or []) if lp.get("loan_id") != loan_id]
+    await db.properties.update_one(
+        {"property_id": property_id},
+        {"$set": {"loan_history": history, "updated_date": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"loan_history": history}
+
+
+@api_router.get("/properties/{property_id}/amortization")
+async def get_amortization(
+    property_id: str,
+    request: Request,
+    start_date: str = Query(""),
+    end_date: str = Query(""),
+):
+    """Return month-by-month amortization schedule across all loan periods, optionally clipped."""
+    user = await get_current_user(request)
+    prop = await db.properties.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    _ensure_loan_history(prop)
+    history = prop.get("loan_history") or []
+    s_d = mortgage_calc._parse_date(start_date) if start_date else None
+    e_d = mortgage_calc._parse_date(end_date) if end_date else None
+    schedule = mortgage_calc.build_amortization_schedule(history, start_date=s_d, end_date=e_d)
+    current = mortgage_calc.current_loan_summary(history)
+    return {
+        "schedule": schedule,
+        "current_loan": current,
+        "total_interest": round(sum(s["interest"] for s in schedule), 2),
+        "total_principal": round(sum(s["principal"] for s in schedule), 2),
+        "total_payment": round(sum(s["payment"] for s in schedule), 2),
+    }
+
+
+@api_router.post("/mortgage/calculate")
+async def calculate_mortgage_preview(request: Request):
+    """
+    Standalone calculator (no persistence). Body:
+      { loan_amount, interest_rate, loan_term_years, repayment_type, interest_only_until?, start_date? }
+    Returns single-month payment breakdown + first-12-months schedule for preview.
+    """
+    user = await get_current_user(request)  # require auth so we don't expose to anonymous
+    body = await request.json()
+    history = [{
+        "loan_id": "preview",
+        "start_date": body.get("start_date") or date.today().isoformat(),
+        "end_date": None,
+        "lender": body.get("lender", ""),
+        "initial_balance": float(body.get("loan_amount", 0) or 0),
+        "interest_rate": float(body.get("interest_rate", 0) or 0),
+        "loan_term_years": int(body.get("loan_term_years", 30) or 30),
+        "repayment_type": body.get("repayment_type", "P&I"),
+        "interest_only_until": body.get("interest_only_until"),
+    }]
+    end_horizon = date.today() + timedelta(days=400)
+    schedule = mortgage_calc.build_amortization_schedule(history, end_date=end_horizon)
+    first_month = schedule[0] if schedule else None
+    return {
+        "monthly_payment": first_month["payment"] if first_month else 0,
+        "monthly_interest": first_month["interest"] if first_month else 0,
+        "monthly_principal": first_month["principal"] if first_month else 0,
+        "balance_after_first_payment": first_month["balance_after"] if first_month else 0,
+        "preview_schedule": schedule[:12],
+    }
 
 @api_router.delete("/properties/{property_id}")
 async def delete_property(property_id: str, request: Request):
@@ -649,11 +971,39 @@ async def create_income(income: IncomeCreate, request: Request):
     entry["created_date"] = datetime.now(timezone.utc).isoformat()
     await db.income_entries.insert_one(entry)
     result = await db.income_entries.find_one({"income_id": entry["income_id"]}, {"_id": 0})
+    # v1.1.0 — auto-create linked agent fee expense if % is configured
+    try:
+        await _upsert_linked_agent_fee_expense(result, prop)
+    except Exception as e:
+        logger.warning(f"Agent fee auto-link failed (create): {type(e).__name__}: {e}")
+    return result
+
+@api_router.patch("/income/{income_id}", response_model=IncomeOut)
+async def update_income(income_id: str, payload: IncomeUpdate, request: Request):
+    user = await get_current_user(request)
+    existing = await db.income_entries.find_one({"income_id": income_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Income entry not found")
+    updates = {k: v for k, v in payload.dict(exclude_unset=True).items()}
+    if updates:
+        await db.income_entries.update_one({"income_id": income_id, "user_id": user["user_id"]}, {"$set": updates})
+    result = await db.income_entries.find_one({"income_id": income_id}, {"_id": 0})
+    # Refresh linked agent fee expense (amount/date/% may have changed)
+    prop = await db.properties.find_one({"property_id": result.get("property_id"), "user_id": user["user_id"]})
+    try:
+        await _upsert_linked_agent_fee_expense(result, prop or {})
+    except Exception as e:
+        logger.warning(f"Agent fee auto-link failed (update): {type(e).__name__}: {e}")
     return result
 
 @api_router.delete("/income/{income_id}")
 async def delete_income(income_id: str, request: Request):
     user = await get_current_user(request)
+    # First clean up any linked agent fee expense
+    try:
+        await _delete_linked_agent_fee_expense(income_id, user["user_id"])
+    except Exception as e:
+        logger.warning(f"Agent fee cleanup on income delete failed: {type(e).__name__}: {e}")
     result = await db.income_entries.delete_one({"income_id": income_id, "user_id": user["user_id"]})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Income entry not found")
@@ -677,13 +1027,42 @@ async def create_expense(expense: ExpenseCreate, request: Request):
     entry["expense_id"] = f"exp_{uuid.uuid4().hex[:12]}"
     entry["user_id"] = user["user_id"]
     entry["created_date"] = datetime.now(timezone.utc).isoformat()
+    # Manual entries are never auto-calculated; auto-calculated flag only set by
+    # _upsert_linked_agent_fee_expense via income endpoints.
+    entry["auto_calculated"] = False
+    entry["linked_income_id"] = None
     await db.expense_entries.insert_one(entry)
     result = await db.expense_entries.find_one({"expense_id": entry["expense_id"]}, {"_id": 0})
+    return result
+
+@api_router.patch("/expenses/{expense_id}", response_model=ExpenseOut)
+async def update_expense(expense_id: str, payload: ExpenseUpdate, request: Request):
+    user = await get_current_user(request)
+    existing = await db.expense_entries.find_one({"expense_id": expense_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Expense entry not found")
+    # Block editing of auto-calculated entries (they sync from income)
+    if existing.get("auto_calculated"):
+        raise HTTPException(
+            status_code=400,
+            detail="This expense is auto-calculated from a rental income entry. Edit the income to change it.",
+        )
+    updates = {k: v for k, v in payload.dict(exclude_unset=True).items()}
+    if updates:
+        await db.expense_entries.update_one({"expense_id": expense_id, "user_id": user["user_id"]}, {"$set": updates})
+    result = await db.expense_entries.find_one({"expense_id": expense_id}, {"_id": 0})
     return result
 
 @api_router.delete("/expenses/{expense_id}")
 async def delete_expense(expense_id: str, request: Request):
     user = await get_current_user(request)
+    # Don't allow direct deletion of auto-calculated entries — user must remove the income
+    existing = await db.expense_entries.find_one({"expense_id": expense_id, "user_id": user["user_id"]}, {"_id": 0})
+    if existing and existing.get("auto_calculated"):
+        raise HTTPException(
+            status_code=400,
+            detail="This expense is auto-calculated from rental income. Delete the income entry to remove it, or set Agent Fee % to 0 on the income.",
+        )
     result = await db.expense_entries.delete_one({"expense_id": expense_id, "user_id": user["user_id"]})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Expense entry not found")
@@ -739,10 +1118,14 @@ async def delete_reminder(reminder_id: str, request: Request):
 # ==================== DASHBOARD ====================
 
 @api_router.get("/dashboard")
-async def get_dashboard(request: Request):
+async def get_dashboard(request: Request, period: str = Query("monthly")):
     user = await get_current_user(request)
     user_id = user["user_id"]
     now = datetime.now(timezone.utc)
+    # period: "monthly" (12 mo), "quarterly" (8 q ~ 2 yr), "yearly" (5 yr)
+    period = (period or "monthly").lower()
+    if period not in ("monthly", "quarterly", "yearly"):
+        period = "monthly"
 
     # Run 3 Mongo queries in parallel — saves ~2/3 of the round-trip latency on
     # managed Mongo Atlas where each query has ~200ms ping overhead.
@@ -807,8 +1190,9 @@ async def get_dashboard(request: Request):
             return amt if d and year_start_date <= d <= today_date else 0
         freq = (entry.get("frequency") or "monthly").lower()
         start = _parse_date(entry.get("date")) or year_start_date
+        end = _parse_date(entry.get("end_date"))  # v1.1.0 — None means ongoing
         active_start = max(start, year_start_date)
-        active_end = today_date
+        active_end = min(end, today_date) if end else today_date
         if active_start > active_end:
             return 0
         days = (active_end - active_start).days + 1
@@ -911,36 +1295,128 @@ async def get_dashboard(request: Request):
             "capital_growth": round(p_growth, 2)
         })
 
-    # Monthly income trend (last 12 months)
-    monthly_income = {}
-    monthly_expenses = {}
-    for i in range(12):
-        m = now.month - i
-        y = now.year
-        if m <= 0:
-            m += 12
-            y -= 1
-        key = f"{y}-{m:02d}"
-        monthly_income[key] = 0
-        monthly_expenses[key] = 0
-    for inc in all_income:
-        month_key = inc.get("date", "")[:7]
-        if month_key in monthly_income:
-            monthly_income[month_key] += inc.get("amount", 0)
-    for exp in all_expenses:
-        month_key = exp.get("date", "")[:7]
-        if month_key in monthly_expenses:
-            monthly_expenses[month_key] += exp.get("amount", 0)
+    # Trend buckets — period-aware (monthly | quarterly | yearly).
+    # Output `monthly_trend` keeps that name for backward compatibility with the
+    # existing mobile clients; consumers should treat it as a generic
+    # "period-bucketed trend" with a string `month` label.
+    trend_buckets = []  # list of (label, start_date, end_date) tuples
+    if period == "yearly":
+        # Last 5 calendar years
+        for i in range(4, -1, -1):
+            y = now.year - i
+            start_d = date(y, 1, 1)
+            end_d = date(y, 12, 31)
+            trend_buckets.append((f"{y}", start_d, end_d))
+    elif period == "quarterly":
+        # Last 8 quarters
+        # Current quarter index 1..4
+        cq = (now.month - 1) // 3 + 1
+        cy = now.year
+        items = []
+        q, y = cq, cy
+        for _ in range(8):
+            start_month = (q - 1) * 3 + 1
+            start_d = date(y, start_month, 1)
+            end_month = start_month + 2
+            # End date is last day of end_month
+            if end_month == 12:
+                end_d = date(y, 12, 31)
+            else:
+                end_d = date(y, end_month + 1, 1) - timedelta(days=1)
+            items.append((f"{y}-Q{q}", start_d, end_d))
+            q -= 1
+            if q == 0:
+                q = 4
+                y -= 1
+        items.reverse()
+        trend_buckets = items
+    else:
+        # Last 12 months
+        for i in range(11, -1, -1):
+            m = now.month - i
+            y = now.year
+            while m <= 0:
+                m += 12
+                y -= 1
+            start_d = date(y, m, 1)
+            # Last day of month
+            if m == 12:
+                end_d = date(y, 12, 31)
+            else:
+                end_d = date(y, m + 1, 1) - timedelta(days=1)
+            trend_buckets.append((f"{y}-{m:02d}", start_d, end_d))
+
+    def _amount_income_in_window(entry, w_start: date, w_end: date) -> float:
+        amt = entry.get("amount", 0) or 0
+        freq = (entry.get("frequency") or "weekly").lower()
+        start = _parse_date(entry.get("date"))
+        end = _parse_date(entry.get("end_date"))
+        if freq == "one-off" or freq == "":
+            return amt if start and w_start <= start <= w_end else 0
+        if not start:
+            return 0
+        active_start = max(start, w_start)
+        active_end = min(end, w_end) if end else w_end
+        if active_start > active_end:
+            return 0
+        days = (active_end - active_start).days + 1
+        if freq == "weekly":
+            return amt * (days / 7.0)
+        if freq == "fortnightly":
+            return amt * (days / 14.0)
+        if freq == "monthly":
+            return amt * (days / 30.4375)
+        if freq == "quarterly":
+            return amt * (days / 91.3125)
+        if freq == "yearly":
+            return amt * (days / 365.25)
+        return amt
+
+    def _amount_expense_in_window(entry, w_start: date, w_end: date) -> float:
+        amt = entry.get("amount", 0) or 0
+        recurring = bool(entry.get("recurring", False))
+        if not recurring:
+            d = _parse_date(entry.get("date"))
+            return amt if d and w_start <= d <= w_end else 0
+        freq = (entry.get("frequency") or "monthly").lower()
+        start = _parse_date(entry.get("date"))
+        end = _parse_date(entry.get("end_date"))
+        if not start:
+            return 0
+        active_start = max(start, w_start)
+        active_end = min(end, w_end) if end else w_end
+        if active_start > active_end:
+            return 0
+        days = (active_end - active_start).days + 1
+        if freq == "weekly":
+            return amt * (days / 7.0)
+        if freq == "fortnightly":
+            return amt * (days / 14.0)
+        if freq == "monthly":
+            return amt * (days / 30.4375)
+        if freq == "quarterly":
+            return amt * (days / 91.3125)
+        if freq == "yearly":
+            return amt * (days / 365.25)
+        return amt
 
     monthly_trend = []
-    for key in sorted(monthly_income.keys()):
-        monthly_trend.append({"month": key, "income": monthly_income[key], "expenses": monthly_expenses[key]})
+    for label, b_start, b_end in trend_buckets:
+        inc_total = sum(_amount_income_in_window(i, b_start, b_end) for i in all_income)
+        exp_total = sum(_amount_expense_in_window(e, b_start, b_end) for e in all_expenses)
+        monthly_trend.append({"month": label, "income": round(inc_total, 2), "expenses": round(exp_total, 2)})
 
-    # Expense by category
+    # Expense by category — uses the same period window as the trend.
+    period_start_for_cat = trend_buckets[0][1] if trend_buckets else year_start_date
+    period_end_for_cat = trend_buckets[-1][2] if trend_buckets else today_date
     expense_by_category = {}
-    for e in ytd_expenses:
+    for e in all_expenses:
+        amt = _amount_expense_in_window(e, period_start_for_cat, period_end_for_cat)
+        if amt <= 0:
+            continue
         cat = e.get("category", "miscellaneous")
-        expense_by_category[cat] = expense_by_category.get(cat, 0) + e.get("amount", 0)
+        expense_by_category[cat] = expense_by_category.get(cat, 0) + amt
+    expense_by_category = {k: round(v, 2) for k, v in expense_by_category.items()}
 
     return {
         "portfolio": {
@@ -956,7 +1432,8 @@ async def get_dashboard(request: Request):
         },
         "property_metrics": property_metrics,
         "monthly_trend": monthly_trend,
-        "expense_by_category": expense_by_category
+        "expense_by_category": expense_by_category,
+        "period": period
     }
 
 # ==================== REPORTS ====================
@@ -1128,21 +1605,86 @@ async def get_report_summary(
     prop = await db.properties.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0})
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
-    income = await db.income_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": period_start, "$lte": period_end}}, {"_id": 0}).to_list(10000)
-    expenses = await db.expense_entries.find({"property_id": property_id, "user_id": user["user_id"], "date": {"$gte": period_start, "$lte": period_end}}, {"_id": 0}).to_list(10000)
-    
-    total_income = sum(i.get("amount", 0) for i in income)
-    total_expenses = sum(e.get("amount", 0) for e in expenses)
-    repair_total = sum(e.get("amount", 0) for e in expenses if e.get("category") in ["repairs", "repeated repairs", "maintenance"])
+    _ensure_loan_history(prop)
+    # v1.1.0 — Don't filter by start `date` field at DB level; pull all entries for the
+    # property and let the prorating logic decide what's active in the window. This
+    # ensures recurring entries that *started* before period_start are still counted
+    # (and end-dated entries are correctly excluded after their end_date).
+    income = await db.income_entries.find({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0}).to_list(10000)
+    expenses = await db.expense_entries.find({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0}).to_list(10000)
+
+    p_start_d = date(int(period_start[:4]), int(period_start[5:7]), int(period_start[8:10]))
+    p_end_d = date(int(period_end[:4]), int(period_end[5:7]), int(period_end[8:10]))
+
+    def _parse_d(s):
+        if not s:
+            return None
+        try:
+            return datetime.fromisoformat(str(s)[:10]).date()
+        except Exception:
+            return None
+
+    def _income_amt(i):
+        amt = i.get("amount", 0) or 0
+        freq = (i.get("frequency") or "weekly").lower()
+        s = _parse_d(i.get("date"))
+        e = _parse_d(i.get("end_date"))
+        if freq == "one-off" or freq == "":
+            return amt if s and p_start_d <= s <= p_end_d else 0
+        if not s:
+            return 0
+        a_s = max(s, p_start_d)
+        a_e = min(e, p_end_d) if e else p_end_d
+        if a_s > a_e:
+            return 0
+        days = (a_e - a_s).days + 1
+        return amt * (days / {"weekly": 7.0, "fortnightly": 14.0, "monthly": 30.4375, "quarterly": 91.3125, "yearly": 365.25}.get(freq, 30.4375))
+
+    def _expense_amt(e):
+        amt = e.get("amount", 0) or 0
+        if not e.get("recurring", False):
+            d = _parse_d(e.get("date"))
+            return amt if d and p_start_d <= d <= p_end_d else 0
+        freq = (e.get("frequency") or "monthly").lower()
+        s = _parse_d(e.get("date"))
+        e_end = _parse_d(e.get("end_date"))
+        if not s:
+            return 0
+        a_s = max(s, p_start_d)
+        a_e = min(e_end, p_end_d) if e_end else p_end_d
+        if a_s > a_e:
+            return 0
+        days = (a_e - a_s).days + 1
+        return amt * (days / {"weekly": 7.0, "fortnightly": 14.0, "monthly": 30.4375, "quarterly": 91.3125, "yearly": 365.25}.get(freq, 30.4375))
+
+    total_income = round(sum(_income_amt(i) for i in income), 2)
+    total_expenses = round(sum(_expense_amt(e) for e in expenses), 2)
+    repair_total = round(sum(_expense_amt(e) for e in expenses if e.get("category") in ["repairs", "repeated repairs", "maintenance"]), 2)
     expense_by_cat = {}
     for e in expenses:
+        amt = _expense_amt(e)
+        if amt <= 0:
+            continue
         cat = e.get("category", "miscellaneous")
-        expense_by_cat[cat] = expense_by_cat.get(cat, 0) + e.get("amount", 0)
-    
+        expense_by_cat[cat] = expense_by_cat.get(cat, 0) + amt
+    expense_by_cat = {k: round(v, 2) for k, v in expense_by_cat.items()}
+
     purchase = prop.get("purchase_price", 0)
     current = prop.get("current_estimated_value", 0)
     growth = ((current - purchase) / purchase * 100) if purchase > 0 else 0
-    
+
+    # v1.1.0 — Tax summary: interest paid in window (deductible) from loan_history amortization
+    tax_summary = None
+    loan_history = prop.get("loan_history") or []
+    if loan_history:
+        ti = mortgage_calc.interest_paid_in_window(loan_history, p_start_d, p_end_d)
+        tax_summary = {
+            "deductible_interest": ti["total_interest"],
+            "principal_paid": ti["total_principal"],
+            "total_mortgage_payment": ti["total_payment"],
+            "months_in_window": ti["months_count"],
+        }
+
     return {
         "property": prop,
         "year": report_year,
@@ -1150,12 +1692,13 @@ async def get_report_summary(
         "end_date": period_end,
         "total_income": total_income,
         "total_expenses": total_expenses,
-        "net_profit_loss": total_income - total_expenses,
+        "net_profit_loss": round(total_income - total_expenses, 2),
         "repair_total": repair_total,
         "capital_growth_pct": round(growth, 2),
         "expense_by_category": expense_by_cat,
         "income_entries": income,
-        "expense_entries": expenses
+        "expense_entries": expenses,
+        "tax_summary": tax_summary,
     }
 
 # ==================== MULTI-YEAR COMPARISON ====================
